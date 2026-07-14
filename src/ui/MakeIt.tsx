@@ -21,8 +21,19 @@ function makeFilename(name: string, ext: string): string {
   return (safe || 'workbench-project') + '.' + ext
 }
 
+/** Kernel jargon never reaches the user. */
+function friendlyError(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e)
+  if (/nothing solid|cut away everything/i.test(raw)) return raw
+  if (/NotManifold|NonFinite|Geometry problem/i.test(raw)) {
+    return "The shapes couldn't be combined into one solid piece. Try undoing your last change, or slide overlapping pieces apart."
+  }
+  return raw
+}
+
 export function MakeItSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const kernelState = useBus((s) => s.kernelState)
+  const doc = useStore((s) => s.doc)
   const [positions, setPositions] = useState<Float32Array | null>(null)
   const [evalError, setEvalError] = useState<string | null>(null)
   const [showMore, setShowMore] = useState(false)
@@ -30,8 +41,9 @@ export function MakeItSheet({ open, onClose }: { open: boolean; onClose: () => v
 
   const ready = kernelState === 'ready'
 
-  // Evaluate the export geometry when the sheet opens (or the kernel wakes up
-  // while it is open).
+  // Evaluate the export geometry when the sheet opens, and re-evaluate if the
+  // document changes while it is open (undo, delete) — preview, STL, and cut
+  // list must never disagree.
   useEffect(() => {
     if (!open || !ready) {
       setPositions(null)
@@ -40,14 +52,14 @@ export function MakeItSheet({ open, onClose }: { open: boolean; onClose: () => v
       return
     }
     try {
-      const r = evaluateExport(useStore.getState().doc)
+      const r = evaluateExport(doc)
       setPositions(r.positions)
       setEvalError(null)
     } catch (e) {
       setPositions(null)
-      setEvalError(e instanceof Error ? e.message : String(e))
+      setEvalError(friendlyError(e))
     }
-  }, [open, ready])
+  }, [open, ready, doc])
 
   // The hero preview: a small dedicated three.js turntable.
   useEffect(() => {
@@ -102,6 +114,9 @@ export function MakeItSheet({ open, onClose }: { open: boolean; onClose: () => v
     return () => {
       cancelAnimationFrame(raf)
       renderer.dispose()
+      // release the GL context immediately — repeatedly opening the sheet
+      // must never starve the main viewport of contexts
+      renderer.forceContextLoss()
       geometry.dispose()
       material.dispose()
       renderer.domElement.remove()
@@ -133,7 +148,7 @@ export function MakeItSheet({ open, onClose }: { open: boolean; onClose: () => v
     try {
       contours = topOutline(doc)
     } catch (e) {
-      useBus.getState().toast(e instanceof Error ? e.message : String(e))
+      useBus.getState().toast(friendlyError(e))
       return
     }
     const name = makeFilename(doc.name, 'dxf')
@@ -155,8 +170,8 @@ export function MakeItSheet({ open, onClose }: { open: boolean; onClose: () => v
   return (
     <div className="wb-sheet-backdrop" onClick={onClose}>
       <div className="wb-sheet" onClick={(e) => e.stopPropagation()}>
-        <button className="wb-sheet-close" onClick={onClose} aria-label="Close">
-          ✕
+        <button className="wb-sheet-close" onClick={onClose}>
+          ✕ Close
         </button>
         <h2>Make It</h2>
 

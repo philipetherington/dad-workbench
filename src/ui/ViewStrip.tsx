@@ -7,6 +7,7 @@ import { useStore } from '../model/store'
 import { SNAP_OPTIONS } from '../model/units'
 import { SpinIcon } from './Icons'
 
+
 const VIEWS: { key: ViewName; label: string }[] = [
   { key: 'corner', label: 'Corner View' },
   { key: 'front', label: 'Front' },
@@ -18,9 +19,14 @@ const VIEWS: { key: ViewName; label: string }[] = [
 
 export function ViewStrip() {
   const camera = useBus((s) => s.camera)
-  const [active, setActive] = useState<ViewName>('corner')
+  const active = useBus((s) => s.activeView)
+  const setActive = useBus((s) => s.setActiveView)
 
   if (!camera) return null
+  const goTo = (v: ViewName) => {
+    setActive(v)
+    camera.goTo(v)
+  }
   return (
     <div className="wb-viewstrip">
       <div className="row">
@@ -28,20 +34,31 @@ export function ViewStrip() {
           <button
             key={v.key}
             className={`wb-view-btn${active === v.key ? ' on' : ''}`}
-            onClick={() => {
-              setActive(v.key)
-              camera.goTo(v.key)
-            }}
+            onClick={() => goTo(v.key)}
           >
             {v.label}
           </button>
         ))}
       </div>
       <div className="row">
-        <button className="wb-view-btn" onClick={() => camera.spin(15)} title="Spin left">
+        <button
+          className="wb-view-btn"
+          onClick={() => {
+            setActive(null)
+            camera.spin(15)
+          }}
+          title="Spin left"
+        >
           <SpinIcon dir="ccw" />
         </button>
-        <button className="wb-view-btn" onClick={() => camera.spin(-15)} title="Spin right">
+        <button
+          className="wb-view-btn"
+          onClick={() => {
+            setActive(null)
+            camera.spin(-15)
+          }}
+          title="Spin right"
+        >
           <SpinIcon dir="cw" />
         </button>
         <button className="wb-view-btn" onClick={() => camera.zoom(0.8)}>

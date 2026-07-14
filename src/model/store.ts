@@ -9,10 +9,24 @@
 
 import { create } from 'zustand'
 import type { Doc, Part } from './types'
-import { clampDims, localSize, worldSize } from './types'
+import { clampDims, DIM_SPECS, worldBottomOffset, worldSize } from './types'
 import type { ToolbarItem } from './parts'
-import { autoName, createPart, emptyDoc } from './parts'
+import { createPart, emptyDoc } from './parts'
 import { DEFAULT_SNAP } from './units'
+
+/** Glued parts always select together — expand ids to whole glue sets. */
+function expandGlue(doc: Doc, ids: string[]): string[] {
+  const out = new Set<string>()
+  for (const id of ids) {
+    const part = doc.parts.find((p) => p.id === id)
+    if (!part) continue
+    out.add(id)
+    if (part.glueId) {
+      for (const q of doc.parts) if (q.glueId === part.glueId) out.add(q.id)
+    }
+  }
+  return [...out]
+}
 
 export type LineUpMode = 'left' | 'right' | 'front' | 'back' | 'centerAcross' | 'centerDeep' | 'even'
 
@@ -49,7 +63,7 @@ export interface WBState {
   deleteSelection: () => void
   duplicateSelection: () => void
   glueSelection: () => void
-  unglue: (glueId: string) => void
+  unglue: (glueId: string | string[]) => void
   toggleLock: (ids: string[]) => void
   lineUp: (mode: LineUpMode, bboxes: BBoxMap) => void
 
@@ -74,20 +88,9 @@ export const useStore = create<WBState>((set, get) => ({
 
   select: (ids, additive = false) =>
     set((s) => {
-      // Glued parts select together: expand every id to its whole glue set.
-      const expand = (list: string[]) => {
-        const out = new Set(list)
-        for (const id of list) {
-          const part = s.doc.parts.find((p) => p.id === id)
-          if (part?.glueId) {
-            for (const q of s.doc.parts) if (q.glueId === part.glueId) out.add(q.id)
-          }
-        }
-        return out
-      }
-      if (!additive) return { selection: [...expand(ids)] }
+      if (!additive) return { selection: expandGlue(s.doc, ids) }
       const merged = new Set(s.selection)
-      for (const id of expand(ids)) {
+      for (const id of expandGlue(s.doc, ids)) {
         if (merged.has(id)) merged.delete(id)
         else merged.add(id)
       }
@@ -158,14 +161,12 @@ export const useStore = create<WBState>((set, get) => ({
     get().mutate((d) => {
       const p = d.parts.find((q) => q.id === id)
       if (!p) return
-      const oldSize = localSize(p)
+      // Keep the part's BOTTOM at the same height when its size changes
+      // (parts grow up, not down through the bench) — in world space, so a
+      // lying dowel whose diameter grows also stays on the bench.
+      const oldBottom = p.position[1] - worldBottomOffset(p)
       p.dims = clampDims(p.kind, { ...p.dims, ...dims })
-      // Keep the part sitting at the same height off the bench when its
-      // vertical size changes (parts grow up, not down through the bench).
-      const newSize = localSize(p)
-      if (p.rotation.every((r) => r === 0)) {
-        p.position[1] += (newSize[1] - oldSize[1]) / 2
-      }
+      p.position[1] = oldBottom + worldBottomOffset(p)
     })
   },
 
@@ -180,6 +181,7 @@ export const useStore = create<WBState>((set, get) => ({
     if (s.selection.length === 0) return
     get().mutate((d) => {
       d.parts = d.parts.filter((p) => !s.selection.includes(p.id))
+      d.glues = d.glues.filter((g) => d.parts.some((p) => p.glueId === g.id))
     })
     set({ selection: [] })
   },
@@ -190,6 +192,8 @@ export const useStore = create<WBState>((set, get) => ({
     const offset = Math.max(s.doc.snapStep * 4, 20)
     const newIds: string[] = []
     get().mutate((d) => {
+      // copies of glued parts get their own fresh glue, never the original's
+      const glueMap = new Map<string, string>()
       const copies = d.parts
         .filter((p) => s.selection.includes(p.id))
         .map((p) => {
@@ -197,6 +201,15 @@ export const useStore = create<WBState>((set, get) => ({
           c.id = crypto.randomUUID()
           c.name = `${p.name} copy`
           c.position = [p.position[0] + offset, p.position[1], p.position[2] + offset]
+          if (c.glueId) {
+            if (!glueMap.has(c.glueId)) {
+              const nid = crypto.randomUUID()
+              const src = d.glues.find((g) => g.id === c.glueId)
+              glueMap.set(c.glueId, nid)
+              d.glues.push({ id: nid, name: src ? `${src.name} copy` : 'Glued piece' })
+            }
+            c.glueId = glueMap.get(c.glueId)!
+          }
           newIds.push(c.id)
           return c
         })
@@ -213,8 +226,10 @@ export const useStore = create<WBState>((set, get) => ({
     if (ids.length < 2) return
     const glueId = crypto.randomUUID()
     get().mutate((d) => {
-      const name = autoName(d, 'Glued piece')
-      d.glues.push({ id: glueId, name })
+      const taken = new Set(d.glues.map((g) => g.name))
+      let n = 1
+      while (taken.has(`Glued piece ${n}`)) n += 1
+      d.glues.push({ id: glueId, name: `Glued piece ${n}` })
       for (const p of d.parts) {
         if (!ids.includes(p.id)) continue
         // one level only: joining an existing glue absorbs it
@@ -228,9 +243,11 @@ export const useStore = create<WBState>((set, get) => ({
   },
 
   unglue: (glueId) => {
+    // one undo step even when taking several assemblies apart at once
+    const glueIds = Array.isArray(glueId) ? glueId : [glueId]
     get().mutate((d) => {
-      for (const p of d.parts) if (p.glueId === glueId) delete p.glueId
-      d.glues = d.glues.filter((g) => g.id !== glueId)
+      for (const p of d.parts) if (p.glueId && glueIds.includes(p.glueId)) delete p.glueId
+      d.glues = d.glues.filter((g) => !glueIds.includes(g.id))
     })
   },
 
@@ -245,46 +262,72 @@ export const useStore = create<WBState>((set, get) => ({
   lineUp: (mode, bboxes) => {
     const s = get()
     const ids = s.selection.filter((id) => bboxes[id] && !s.doc.parts.find((p) => p.id === id)?.locked)
-    if (ids.length < 2) return
-    get().mutate((d) => {
-      const parts = d.parts.filter((p) => ids.includes(p.id))
-      const move = (p: Part, axis: 0 | 2, delta: number) => {
-        p.position[axis] += delta
+
+    // A glued assembly lines up as ONE unit — moving its members
+    // independently would collapse the shape the user built.
+    interface Unit {
+      partIds: string[]
+      min: [number, number]
+      max: [number, number] // [x, z]
+    }
+    const unitMap = new Map<string, Unit>()
+    for (const id of ids) {
+      const part = s.doc.parts.find((p) => p.id === id)!
+      const key = part.glueId ?? part.id
+      const b = bboxes[id]
+      const u = unitMap.get(key)
+      if (!u) {
+        unitMap.set(key, {
+          partIds: [id],
+          min: [b.min[0], b.min[2]],
+          max: [b.max[0], b.max[2]],
+        })
+      } else {
+        u.partIds.push(id)
+        u.min = [Math.min(u.min[0], b.min[0]), Math.min(u.min[1], b.min[2])]
+        u.max = [Math.max(u.max[0], b.max[0]), Math.max(u.max[1], b.max[2])]
       }
+    }
+    const units = [...unitMap.values()]
+    if (mode === 'even' ? units.length < 3 : units.length < 2) return
+
+    get().mutate((d) => {
+      const moveUnit = (u: Unit, axis: 0 | 2, delta: number) => {
+        for (const p of d.parts) {
+          if (u.partIds.includes(p.id)) p.position[axis] += delta
+        }
+      }
+      const ua = (axis: 0 | 2) => (axis === 0 ? 0 : 1) // unit min/max index
       if (mode === 'even') {
-        // Even spacing along the axis the selection is most spread out on.
         const axis: 0 | 2 =
-          Math.max(...ids.map((i) => bboxes[i].max[0])) - Math.min(...ids.map((i) => bboxes[i].min[0])) >=
-          Math.max(...ids.map((i) => bboxes[i].max[2])) - Math.min(...ids.map((i) => bboxes[i].min[2]))
+          Math.max(...units.map((u) => u.max[0])) - Math.min(...units.map((u) => u.min[0])) >=
+          Math.max(...units.map((u) => u.max[1])) - Math.min(...units.map((u) => u.min[1]))
             ? 0
             : 2
-        const sorted = [...parts].sort(
-          (a, b) => (bboxes[a.id].min[axis] + bboxes[a.id].max[axis]) - (bboxes[b.id].min[axis] + bboxes[b.id].max[axis]),
-        )
-        if (sorted.length < 3) return
-        const totalSize = sorted.reduce((acc, p) => acc + (bboxes[p.id].max[axis] - bboxes[p.id].min[axis]), 0)
-        const span =
-          Math.max(...ids.map((i) => bboxes[i].max[axis])) - Math.min(...ids.map((i) => bboxes[i].min[axis]))
-        const gap = (span - totalSize) / (sorted.length - 1)
-        let cursor = Math.min(...ids.map((i) => bboxes[i].min[axis]))
-        for (const p of sorted) {
-          const size = bboxes[p.id].max[axis] - bboxes[p.id].min[axis]
-          move(p, axis, cursor - bboxes[p.id].min[axis])
-          cursor += size + gap
+        const i = ua(axis)
+        const sorted = [...units].sort((a, b) => a.min[i] + a.max[i] - (b.min[i] + b.max[i]))
+        const totalSize = sorted.reduce((acc, u) => acc + (u.max[i] - u.min[i]), 0)
+        const lo = Math.min(...units.map((u) => u.min[i]))
+        const hi = Math.max(...units.map((u) => u.max[i]))
+        const gap = (hi - lo - totalSize) / (sorted.length - 1)
+        let cursor = lo
+        for (const u of sorted) {
+          moveUnit(u, axis, cursor - u.min[i])
+          cursor += u.max[i] - u.min[i] + gap
         }
         return
       }
       const axis: 0 | 2 = mode === 'left' || mode === 'right' || mode === 'centerAcross' ? 0 : 2
+      const i = ua(axis)
       if (mode === 'left' || mode === 'back') {
-        const target = Math.min(...ids.map((i) => bboxes[i].min[axis]))
-        for (const p of parts) move(p, axis, target - bboxes[p.id].min[axis])
+        const target = Math.min(...units.map((u) => u.min[i]))
+        for (const u of units) moveUnit(u, axis, target - u.min[i])
       } else if (mode === 'right' || mode === 'front') {
-        const target = Math.max(...ids.map((i) => bboxes[i].max[axis]))
-        for (const p of parts) move(p, axis, target - bboxes[p.id].max[axis])
+        const target = Math.max(...units.map((u) => u.max[i]))
+        for (const u of units) moveUnit(u, axis, target - u.max[i])
       } else {
-        const target =
-          ids.reduce((acc, i) => acc + (bboxes[i].min[axis] + bboxes[i].max[axis]) / 2, 0) / ids.length
-        for (const p of parts) move(p, axis, target - (bboxes[p.id].min[axis] + bboxes[p.id].max[axis]) / 2)
+        const target = units.reduce((acc, u) => acc + (u.min[i] + u.max[i]) / 2, 0) / units.length
+        for (const u of units) moveUnit(u, axis, target - (u.min[i] + u.max[i]) / 2)
       }
     })
   },
@@ -297,7 +340,7 @@ export const useStore = create<WBState>((set, get) => ({
       doc: prev,
       past: s.past.slice(0, -1),
       future: [s.doc, ...s.future],
-      selection: s.selection.filter((id) => prev.parts.some((p) => p.id === id)),
+      selection: expandGlue(prev, s.selection),
     })
   },
 
@@ -309,7 +352,7 @@ export const useStore = create<WBState>((set, get) => ({
       doc: next,
       past: [...s.past, s.doc],
       future: s.future.slice(1),
-      selection: s.selection.filter((id) => next.parts.some((p) => p.id === id)),
+      selection: expandGlue(next, s.selection),
     })
   },
 
@@ -333,9 +376,10 @@ export const useStore = create<WBState>((set, get) => ({
     }, { history: false }),
 
   setDocName: (name) =>
+    // no history: one undo step per keystroke would bury real work
     get().mutate((d) => {
       d.name = name
-    }),
+    }, { history: false }),
 }))
 
 // --- persistence helpers (autosave wiring lives in main.tsx) ---
@@ -344,14 +388,47 @@ export function serializeDoc(doc: Doc): string {
   return JSON.stringify(doc, null, 2)
 }
 
+const VALID_ROLES = new Set(['solid', 'hole'])
+
+function isVec3(v: unknown): v is [number, number, number] {
+  return Array.isArray(v) && v.length === 3 && v.every((n) => Number.isFinite(n))
+}
+
+/**
+ * Strict structural validation: user-supplied files and old autosaves must
+ * never be able to install a doc that crashes the app on every launch.
+ * Repairs what it safely can (dims via clampDims), rejects the rest.
+ */
 export function deserializeDoc(json: string): Doc | null {
   try {
     const d = JSON.parse(json)
-    if (d && d.version === 1 && Array.isArray(d.parts)) {
-      d.glues ??= []
-      return d as Doc
+    if (!d || d.version !== 1 || !Array.isArray(d.parts)) return null
+    for (const p of d.parts) {
+      if (
+        typeof p !== 'object' || p === null ||
+        typeof p.id !== 'string' ||
+        typeof p.name !== 'string' ||
+        !(p.kind in DIM_SPECS) ||
+        !VALID_ROLES.has(p.role) ||
+        !isVec3(p.position) ||
+        !isVec3(p.rotation) ||
+        typeof p.dims !== 'object' || p.dims === null
+      ) {
+        return null
+      }
+      p.dims = clampDims(p.kind, p.dims)
+      if (typeof p.color !== 'string') p.color = '#c9a06a'
     }
-    return null
+    d.units = d.units === 'in' || d.units === 'mm' ? d.units : 'mm'
+    d.snapStep = Number.isFinite(d.snapStep) && d.snapStep > 0 ? d.snapStep : DEFAULT_SNAP[d.units as 'in' | 'mm']
+    d.name = typeof d.name === 'string' ? d.name : 'Untitled project'
+    d.glues = Array.isArray(d.glues)
+      ? d.glues.filter((g: unknown) => {
+          const glue = g as { id?: unknown; name?: unknown }
+          return glue && typeof glue.id === 'string' && typeof glue.name === 'string'
+        })
+      : []
+    return d as Doc
   } catch {
     return null
   }

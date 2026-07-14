@@ -43,8 +43,11 @@ interface BusState {
   toasts: Toast[]
   toast: (text: string, actionLabel?: string, onAction?: () => void) => void
   dismissToast: (id: number) => void
-  saveState: 'saved' | 'saving'
-  setSaveState: (s: 'saved' | 'saving') => void
+  saveState: 'saved' | 'saving' | 'error'
+  setSaveState: (s: 'saved' | 'saving' | 'error') => void
+  /** Which named view is active, or null after a free orbit. */
+  activeView: ViewName | null
+  setActiveView: (v: ViewName | null) => void
   /** Live readout while dragging ("24 1/2\""), null when idle. */
   dragReadout: string | null
   setDragReadout: (t: string | null) => void
@@ -78,6 +81,8 @@ export const useBus = create<BusState>((set) => ({
   dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
   saveState: 'saved',
   setSaveState: (saveState) => set({ saveState }),
+  activeView: 'corner',
+  setActiveView: (activeView) => set({ activeView }),
   dragReadout: null,
   setDragReadout: (dragReadout) => set({ dragReadout }),
   hoveredId: null,

@@ -63,11 +63,13 @@ function primitive(doc: Doc, part: Part): string[] {
       ]
     }
     case 'slot': {
-      const straight = Math.max(d.length - d.width, 0)
+      // same clamp as engine/evaluate.ts: a slot can never be wider than long
+      const w = Math.min(d.width, d.length)
+      const straight = d.length - w
       return [
-        `rotate([-90, 0, 0]) hull() {` + dimComment(doc, [d.length, d.width, d.deep]),
-        `  translate([-${num(straight / 2)}, 0, 0]) cylinder(h = ${num(d.deep)}, d = ${num(d.width)}, center = true);`,
-        `  translate([${num(straight / 2)}, 0, 0]) cylinder(h = ${num(d.deep)}, d = ${num(d.width)}, center = true);`,
+        `rotate([-90, 0, 0]) hull() {` + dimComment(doc, [d.length, w, d.deep]),
+        `  translate([-${num(straight / 2)}, 0, 0]) cylinder(h = ${num(d.deep)}, d = ${num(w)}, center = true);`,
+        `  translate([${num(straight / 2)}, 0, 0]) cylinder(h = ${num(d.deep)}, d = ${num(w)}, center = true);`,
         `}`,
       ]
     }

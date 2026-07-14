@@ -30,8 +30,8 @@ export function HelpSheet({
   return (
     <div className="wb-sheet-backdrop" onClick={onClose}>
       <div className="wb-sheet" onClick={(e) => e.stopPropagation()}>
-        <button className="wb-sheet-close" onClick={onClose} aria-label="Close">
-          ✕
+        <button className="wb-sheet-close" onClick={onClose}>
+          ✕ Close
         </button>
         <h2>Help</h2>
 

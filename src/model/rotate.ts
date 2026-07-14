@@ -7,7 +7,7 @@
 
 import * as THREE from 'three'
 import type { Part } from './types'
-import { worldSize } from './types'
+import { worldBottomOffset } from './types'
 
 export type TurnKind = 'turn' | 'tip' | 'tilt'
 
@@ -50,12 +50,10 @@ export function rotated(
  * resting there (bottom within 1mm before the turn).
  */
 export function applyRotation(part: Part, axis: THREE.Vector3, degrees: number): void {
-  const before = worldSize(part)
-  const wasResting = Math.abs(part.position[1] - before[1] / 2) < 1
+  const wasResting = Math.abs(part.position[1] - worldBottomOffset(part)) < 1
   part.rotation = rotated(part.rotation, axis, degrees)
-  const after = worldSize(part)
   if (wasResting) {
-    part.position = [part.position[0], after[1] / 2, part.position[2]]
+    part.position = [part.position[0], worldBottomOffset(part), part.position[2]]
   }
 }
 
@@ -68,8 +66,7 @@ export const POSTURES: { key: string; label: string; rotation: [number, number, 
 
 export function applyPosture(part: Part, rotation: [number, number, number]): void {
   part.rotation = [...rotation]
-  const after = worldSize(part)
-  part.position = [part.position[0], after[1] / 2, part.position[2]]
+  part.position = [part.position[0], worldBottomOffset(part), part.position[2]]
 }
 
 /** Mirror the part left-right (for making the matching pair of a bracket). */

@@ -22,6 +22,7 @@ export function DimField({ label, mm, units, step, min = 0.5, onCommit, autoFocu
   const [editing, setEditing] = useState(false)
   const [bad, setBad] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const cancelRef = useRef(false)
 
   // reflect outside changes (handle drags, undo) while not editing
   useEffect(() => {
@@ -43,6 +44,15 @@ export function DimField({ label, mm, units, step, min = 0.5, onCommit, autoFocu
 
   const commit = () => {
     setEditing(false)
+    // Escape means "never mind" — restore, commit nothing.
+    if (cancelRef.current) {
+      cancelRef.current = false
+      setText(formatLengthBare(mm, units))
+      return
+    }
+    // Unchanged text commits nothing: the display is rounded to 1/32", and
+    // re-committing it would silently alter a precise value.
+    if (text.trim() === formatLengthBare(mm, units)) return
     const v = parseLength(text, units)
     if (v === null || v < 0) {
       setBad(true)
@@ -81,8 +91,7 @@ export function DimField({ label, mm, units, step, min = 0.5, onCommit, autoFocu
           onKeyDown={(e) => {
             if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
             if (e.key === 'Escape') {
-              setText(formatLengthBare(mm, units))
-              setEditing(false)
+              cancelRef.current = true
               ;(e.target as HTMLInputElement).blur()
             }
           }}

@@ -3,9 +3,10 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../model/store'
+import { formatLengthBare } from '../model/units'
 import { useBus } from '../viewport/bus'
 import { TEMPLATES } from '../model/templates'
-import { beginNewProject } from './projectsStore'
+import { beginNewProject, currentProjectId, saveProject } from './projectsStore'
 
 const COACH_KEY = 'workbench-coach-done'
 const OFFER_KEY = 'workbench-offer-done'
@@ -31,7 +32,7 @@ export function Coach({ replayNonce }: Props) {
   const camera = useBus((s) => s.camera)
 
   // watch for "he did the thing" per step
-  const baseline = useRef<{ len?: number; pos?: string; yaw?: number }>({})
+  const baseline = useRef<{ dims?: string; pos?: string; yaw?: number }>({})
 
   useEffect(() => {
     if (replayNonce > 0) {
@@ -46,8 +47,12 @@ export function Coach({ replayNonce }: Props) {
     const first = doc.parts.find((p) => p.role === 'solid')
     if (!first) return
     if (step === 1) {
-      if (baseline.current.len === undefined) baseline.current.len = first.dims.length
-      else if (Math.abs(first.dims.length - baseline.current.len) > 0.01) setStep(2)
+      // fingerprint ALL dims — the first piece may be a dowel or ball with no 'length'
+      const key = Object.entries(first.dims)
+        .map(([k, v]) => `${k}:${v}`)
+        .join(',')
+      if (baseline.current.dims === undefined) baseline.current.dims = key
+      else if (key !== baseline.current.dims) setStep(2)
     }
     if (step === 2) {
       const key = first.position.join(',')
@@ -81,15 +86,25 @@ export function Coach({ replayNonce }: Props) {
     setOfferVisible(false)
     const t = TEMPLATES.find((t) => t.id === 'bookshelf')
     if (t) {
+      // never lose the project he just made — same rule as every switch flow
+      saveProject(currentProjectId(), useStore.getState().doc)
       beginNewProject()
       useStore.getState().loadDoc(t.build())
       useBus.getState().toast('Here is a finished bookshelf. Click any piece to see how it was made.')
     }
   }
 
+  const firstSolid = doc.parts.find((p) => p.role === 'solid')
+  const step1Text =
+    firstSolid && firstSolid.kind === 'board'
+      ? `This board is ${formatLengthBare(firstSolid.dims.length, doc.units)} ${
+          doc.units === 'in' ? 'inches' : 'millimeters'
+        } long. Type a new length in the panel on the right →`
+      : 'Type a new size in the panel on the right →'
+
   const messages: Record<number, { text: string; cls: string; style: React.CSSProperties }> = {
     1: {
-      text: 'This board is 24 inches long. Type a new length in the panel on the right →',
+      text: step1Text,
       cls: 'point-right',
       style: { right: 24, top: 120 },
     },

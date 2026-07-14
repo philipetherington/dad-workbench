@@ -125,7 +125,9 @@ export function localSize(part: Part): [number, number, number] {
     case 'wedge':
       return [d.length, d.height, d.width]
     case 'slot':
-      return [Math.max(d.length, d.width), d.deep, d.width]
+      // the engine clamps a slot's width to its length (a wider-than-long
+      // slot is just a circle of diameter = length)
+      return [d.length, d.deep, Math.min(d.width, d.length)]
   }
 }
 
@@ -153,6 +155,39 @@ export function worldSize(part: Part): [number, number, number] {
   return [0, 1, 2].map((i) =>
     Math.abs(R[i][0]) * s[0] + Math.abs(R[i][1]) * s[1] + Math.abs(R[i][2]) * s[2],
   ) as [number, number, number]
+}
+
+/**
+ * Distance from the part's position down to the true bottom of its world
+ * bounding box. For box-like shapes this is worldSize()[1]/2; round shapes
+ * get exact support math so re-seating never leaves them hovering.
+ */
+export function worldBottomOffset(part: Part): number {
+  const d = part.dims
+  const r = rotationMatrix(part.rotation)[1] // world-y row
+  const horiz = Math.hypot(r[0], r[2])
+  switch (part.kind) {
+    case 'sphere':
+      return d.diameter / 2
+    case 'cylinder': {
+      // support of two circles at local y = ±h/2, radius dia/2
+      const half = (d.height / 2) * Math.abs(r[1]) + (d.diameter / 2) * horiz
+      return half
+    }
+    case 'cone': {
+      // base circle at -h/2 (radius d/2), top circle at +h/2 (radius topD/2);
+      // the rotated bbox is not centered on position, so return -minY exactly
+      const yBase = (-d.height / 2) * r[1]
+      const yTop = (d.height / 2) * r[1]
+      const minY = Math.min(
+        yBase - (d.diameter / 2) * horiz,
+        yTop - (d.topDiameter / 2) * horiz,
+      )
+      return -minY
+    }
+    default:
+      return worldSize(part)[1] / 2
+  }
 }
 
 export function clampDims(kind: ShapeKind, dims: Record<string, number>): Record<string, number> {

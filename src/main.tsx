@@ -17,8 +17,15 @@ initKernel()
   })
 
 // ---- boot: restore last session, or set up the first-run bench ----
-const saved = localStorage.getItem(AUTOSAVE_KEY)
-const doc = saved ? deserializeDoc(saved) : null
+let doc = null
+try {
+  const saved = localStorage.getItem(AUTOSAVE_KEY)
+  doc = saved ? deserializeDoc(saved) : null
+  // a corrupt autosave must never brick every future launch
+  if (saved && !doc) localStorage.removeItem(AUTOSAVE_KEY)
+} catch (e) {
+  console.error('autosave restore failed', e)
+}
 if (doc) {
   useStore.getState().loadDoc(doc)
 } else {
@@ -43,6 +50,7 @@ useStore.subscribe((s, prev) => {
       useBus.getState().setSaveState('saved')
     } catch (e) {
       console.error('autosave failed', e)
+      useBus.getState().setSaveState('error')
     }
   }, 400)
 })

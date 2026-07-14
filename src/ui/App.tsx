@@ -61,6 +61,14 @@ export function App() {
       const target = e.target as HTMLElement
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
       const s = useStore.getState()
+      const sheetOpen = sheet !== 'none'
+      if (e.key === 'Escape') {
+        if (sheetOpen) setSheet('none')
+        else s.clearSelection()
+        return
+      }
+      // while a sheet is up, keys must not invisibly edit the project behind it
+      if (sheetOpen) return
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault()
         if (e.shiftKey) s.redo()
@@ -74,13 +82,11 @@ export function App() {
           s.deleteSelection()
           useBus.getState().toast(`Removed ${n === 1 ? `'${name}'` : name}`, 'Put It Back', () => s.undo())
         }
-      } else if (e.key === 'Escape') {
-        s.clearSelection()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [sheet])
 
   // keep the project registry in sync with autosave (for the Recents grid)
   useEffect(() => {

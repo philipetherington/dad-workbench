@@ -122,4 +122,69 @@ describe('export pipeline', () => {
     doc.parts = doc.parts.filter((p) => p.role === 'hole')
     expect(() => evaluateExport(doc)).toThrow(/nothing solid/i)
   })
+
+  it('DXF outline is the full silhouette, not a mid-height slice (wedge regression)', () => {
+    const doc = TEMPLATES.find((t) => t.id === 'doorstop')!.build()
+    const contours = topOutline(doc)
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+    for (const c of contours) {
+      for (const [x, y] of c) {
+        minX = Math.min(minX, x); maxX = Math.max(maxX, x)
+        minY = Math.min(minY, y); maxY = Math.max(maxY, y)
+      }
+    }
+    // the Door Wedge is 5" x 1.5" in plan — the silhouette must span all of it
+    expect(maxX - minX).toBeCloseTo(5 * IN, 1)
+    expect(maxY - minY).toBeCloseTo(1.5 * IN, 1)
+  })
+})
+
+describe('re-seating math', () => {
+  it('a tipped sphere never floats: bottom offset is always the radius', async () => {
+    const { worldBottomOffset } = await import('./model/types')
+    const sphere = {
+      id: 's', name: 'Ball', kind: 'sphere' as const, role: 'solid' as const,
+      dims: { diameter: 100 }, position: [0, 50, 0] as [number, number, number],
+      rotation: [45, 0, 30] as [number, number, number], color: '#fff',
+    }
+    expect(worldBottomOffset(sphere)).toBeCloseTo(50, 6)
+  })
+
+  it('a lying dowel sits by its diameter, matching the engine bbox', async () => {
+    const { worldBottomOffset } = await import('./model/types')
+    const dowel = {
+      id: 'd', name: 'Dowel', kind: 'cylinder' as const, role: 'solid' as const,
+      dims: { diameter: 20, height: 300 }, position: [0, 10, 0] as [number, number, number],
+      rotation: [0, 0, 90] as [number, number, number], color: '#fff',
+    }
+    expect(worldBottomOffset(dowel)).toBeCloseTo(10, 6)
+    const result = evaluateScene({
+      version: 1, name: 't', units: 'mm', snapStep: 1, glues: [], parts: [dowel],
+    })
+    expect(result.parts[0].bbox.min[1]).toBeCloseTo(0, 4)
+  })
+})
+
+describe('document validation', () => {
+  it('rejects structurally broken docs instead of installing them', async () => {
+    const { deserializeDoc } = await import('./model/store')
+    expect(deserializeDoc('{"version":1,"parts":[{}]}')).toBeNull()
+    expect(deserializeDoc('{"version":1,"parts":[{"id":"a","name":"x","kind":"nope","role":"solid","dims":{},"position":[0,0,0],"rotation":[0,0,0]}]}')).toBeNull()
+    expect(deserializeDoc('not json')).toBeNull()
+  })
+
+  it('round-trips a real doc and repairs missing fields', async () => {
+    const { deserializeDoc, serializeDoc } = await import('./model/store')
+    const doc = bookshelf()
+    const back = deserializeDoc(serializeDoc(doc))
+    expect(back).not.toBeNull()
+    expect(back!.parts).toHaveLength(doc.parts.length)
+    // missing glues array and bogus snapStep get repaired
+    const loose = JSON.parse(serializeDoc(doc))
+    delete loose.glues
+    loose.snapStep = 'bad'
+    const repaired = deserializeDoc(JSON.stringify(loose))
+    expect(repaired!.glues).toEqual([])
+    expect(repaired!.snapStep).toBeGreaterThan(0)
+  })
 })

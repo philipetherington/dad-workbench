@@ -125,7 +125,7 @@ button { font: inherit; color: inherit; }
   color: var(--red);
   background: #fff;
 }
-.wb-btn.small { min-height: 40px; padding: 4px 12px; font-size: 16px; }
+.wb-btn.small { min-height: 48px; padding: 4px 12px; font-size: 16px; }
 .wb-btn.wide { width: 100%; }
 
 /* ---------- left panel ---------- */
@@ -197,10 +197,12 @@ button { font: inherit; color: inherit; }
   background: none;
   font-size: 18px;
   cursor: pointer;
-  opacity: 0.35;
-  padding: 6px;
+  opacity: 0.55;
+  padding: 12px;
+  min-width: 44px;
+  min-height: 44px;
 }
-.wb-piece-row .pin.on { opacity: 1; }
+.wb-piece-row .pin.on { opacity: 1; color: var(--accent); }
 
 .wb-eye-row {
   display: flex;
@@ -254,9 +256,10 @@ button { font: inherit; color: inherit; }
 
 .wb-chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .wb-chip {
-  font-size: 14.5px;
+  font-size: 15px;
   font-weight: 600;
-  padding: 7px 10px;
+  min-height: 42px;
+  padding: 8px 13px;
   border-radius: 999px;
   border: 1.5px solid var(--panel-edge);
   background: #fff;
@@ -474,15 +477,19 @@ button { font: inherit; color: inherit; }
   position: sticky;
   top: 0;
   align-self: flex-end;
-  margin-bottom: -44px;
-  border: none;
-  background: none;
-  font-size: 30px;
+  margin-bottom: -48px;
+  border: 2px solid var(--panel-edge);
+  border-radius: 10px;
+  background: #fff;
+  font-size: 17px;
+  font-weight: 650;
   cursor: pointer;
-  color: var(--ink-soft);
-  padding: 4px 10px;
+  color: var(--ink);
+  padding: 10px 16px;
+  min-height: 48px;
   z-index: 2;
 }
+.wb-sheet-close:hover { border-color: var(--accent); }
 .wb-sheet .rows { display: flex; flex-direction: column; gap: 10px; }
 .wb-sheet-row {
   display: flex;

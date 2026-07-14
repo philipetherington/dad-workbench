@@ -90,7 +90,15 @@ export function LeftPanel() {
       <div className="wb-section-title cut">CUT A HOLE</div>
       <div className="wb-shape-grid">
         {HOLE_ITEMS.map((item) => (
-          <button key={item.id} className="wb-shape-btn" onClick={() => addPart(item)}>
+          <button
+            key={item.id}
+            className="wb-shape-btn"
+            onClick={() => {
+              // a brand-new hole must never arrive invisible
+              if (!showCutouts) setShowCutouts(true)
+              addPart(item)
+            }}
+          >
             <ShapeIcon id={item.id} />
             {item.label}
           </button>

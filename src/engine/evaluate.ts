@@ -286,8 +286,9 @@ export function topOutline(doc: Doc, partId?: string): [number, number][][] {
       body = combinedManifold(m, doc, scratch)
     }
     const zUp = scratch.keep(body.rotate([90, 0, 0]))
-    const bb = zUp.boundingBox()
-    const cross = zUp.slice((bb.min[2] + bb.max[2]) / 2)
+    // True top-down silhouette. A mid-height slice gets sloped shapes (wedges,
+    // cones) and shallow recesses wrong; project() is the shape a shop cuts.
+    const cross = zUp.project()
     const polys = cross.toPolygons() as [number, number][][]
     cross.delete()
     return polys.map((poly) => poly.map((pt) => [pt[0], pt[1]] as [number, number]))

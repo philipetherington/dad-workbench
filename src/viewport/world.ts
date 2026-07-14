@@ -8,7 +8,7 @@
 
 import * as THREE from 'three'
 import type { Doc, Part } from '../model/types'
-import { DIM_SPECS, clampDims, localSize } from '../model/types'
+import { DIM_SPECS, clampDims, localSize, worldBottomOffset } from '../model/types'
 import { formatLength, snap } from '../model/units'
 import { useStore } from '../model/store'
 import { evaluateScene } from '../engine/evaluate'
@@ -23,13 +23,24 @@ const MAGNET_MM = 6.35 // 1/4" capture radius for face magnetism
 const SELECT_ORANGE = new THREE.Color('#ff7a1a')
 const OVERLAP_AMBER = new THREE.Color('#d99a00')
 
+/** Dispose every geometry/material in a subtree (textures are shared; not touched). */
+function disposeSubtree(root: THREE.Object3D) {
+  root.traverse((obj) => {
+    const mesh = obj as THREE.Mesh
+    if (mesh.geometry) mesh.geometry.dispose()
+    const mat = mesh.material as THREE.Material | THREE.Material[] | undefined
+    if (Array.isArray(mat)) mat.forEach((m) => m.dispose())
+    else if (mat) mat.dispose()
+  })
+}
+
 interface PartVisual {
   mesh: THREE.Mesh
   edges: THREE.LineSegments | null
 }
 
 type Drag =
-  | { kind: 'orbit'; lastX: number; lastY: number; moved: boolean }
+  | { kind: 'orbit'; lastX: number; lastY: number; startX: number; startY: number; moved: boolean }
   | { kind: 'maybe-move'; partId: string; startX: number; startY: number; shift: boolean }
   | {
       kind: 'move'
@@ -54,8 +65,8 @@ type Drag =
   | {
       kind: 'lift'
       ids: string[]
-      plane: THREE.Plane
-      startHit: THREE.Vector3
+      startClientY: number
+      worldPerPixel: number
       startPositions: Map<string, [number, number, number]>
       maxDrop: number
     }
@@ -79,6 +90,7 @@ export class World {
   private stripes = stripeTexture()
 
   private drag: Drag | null = null
+  private dragPointerId: number | null = null
   private evalQueued = false
   private evalDirty = true
   private disposed = false
@@ -92,7 +104,7 @@ export class World {
     this.renderer = new THREE.WebGLRenderer({ antialias: true })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     this.renderer.shadowMap.enabled = true
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
+    this.renderer.shadowMap.type = THREE.PCFShadowMap
     this.renderer.setClearColor('#e9e4dc')
     mount.appendChild(this.renderer.domElement)
     this.renderer.domElement.style.display = 'block'
@@ -142,6 +154,7 @@ export class World {
     el.addEventListener('pointercancel', this.onPointerUp)
     el.addEventListener('wheel', this.onWheel, { passive: false })
     el.addEventListener('dblclick', this.onDblClick)
+    el.addEventListener('contextmenu', this.onContextMenu)
 
     // camera API for the view strip
     useBus.getState().setCamera({
@@ -184,11 +197,20 @@ export class World {
     el.removeEventListener('pointercancel', this.onPointerUp)
     el.removeEventListener('wheel', this.onWheel)
     el.removeEventListener('dblclick', this.onDblClick)
+    el.removeEventListener('contextmenu', this.onContextMenu)
     for (const v of this.visuals.values()) this.disposeVisual(v)
+    if (this.handleGroup) disposeSubtree(this.handleGroup)
+    disposeSubtree(this.liftHandle)
+    disposeSubtree(this.benchGroup)
+    this.dropLine.geometry.dispose()
+    ;(this.dropLine.material as THREE.Material).dispose()
+    this.stripes.dispose()
     this.renderer.dispose()
     this.mount.removeChild(this.renderer.domElement)
     this.mount.removeChild(this.labelLayer)
   }
+
+  private onContextMenu = (e: Event) => e.preventDefault()
 
   resize = () => {
     const w = this.mount.clientWidth || 1
@@ -376,6 +398,7 @@ export class World {
     const { selection, doc } = useStore.getState()
     if (this.handleGroup) {
       this.scene.remove(this.handleGroup)
+      disposeSubtree(this.handleGroup)
       this.handleGroup = null
       this.handlePartId = null
     }
@@ -528,6 +551,9 @@ export class World {
 
   private onPointerDown = (e: PointerEvent) => {
     if (e.button !== 0 && e.button !== 2) return
+    // a second finger/button must never clobber a live drag
+    if (this.drag) return
+    this.dragPointerId = e.pointerId
     this.renderer.domElement.setPointerCapture(e.pointerId)
     const store = useStore.getState()
 
@@ -552,7 +578,14 @@ export class World {
     }
 
     // background: turntable
-    this.drag = { kind: 'orbit', lastX: e.clientX, lastY: e.clientY, moved: false }
+    this.drag = {
+      kind: 'orbit',
+      lastX: e.clientX,
+      lastY: e.clientY,
+      startX: e.clientX,
+      startY: e.clientY,
+      moved: false,
+    }
     this.renderer.domElement.style.cursor = 'grabbing'
     void store
   }
@@ -632,16 +665,12 @@ export class World {
     const doc = store.doc
     const ids = store.selection.filter((id) => !doc.parts.find((p) => p.id === id)?.locked)
     if (ids.length === 0) return
-    const camDir = this.rig.camera.getWorldDirection(new THREE.Vector3())
-    const normal = new THREE.Vector3(camDir.x, 0, camDir.z)
-    if (normal.lengthSq() < 1e-6) normal.set(0, 0, 1)
-    normal.normalize()
-    const box = this.selectionBBox()
-    if (!box) return
-    const anchor = new THREE.Vector3((box.min.x + box.max.x) / 2, box.max.y, (box.min.z + box.max.z) / 2)
-    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, anchor)
-    const hit = new THREE.Vector3()
-    if (!this.pointerRay(e).ray.intersectPlane(plane, hit)) return
+    // Screen-space lift: ~1 mm per pixel at default zoom, at EVERY camera
+    // pitch. (A vertical drag plane goes degenerate near the Top view and
+    // flings parts hundreds of mm per pixel.)
+    const worldPerPixel =
+      (2 * this.rig.getDist() * Math.tan((this.rig.camera.fov * Math.PI) / 360)) /
+      Math.max(this.renderer.domElement.clientHeight, 1)
     const startPositions = new Map<string, [number, number, number]>()
     let minBottom = Infinity
     for (const id of ids) {
@@ -652,11 +681,19 @@ export class World {
       minBottom = Math.min(minBottom, b.min[1])
     }
     store.startDrag()
-    this.drag = { kind: 'lift', ids, plane, startHit: hit, startPositions, maxDrop: minBottom }
+    this.drag = {
+      kind: 'lift',
+      ids,
+      startClientY: e.clientY,
+      worldPerPixel,
+      startPositions,
+      maxDrop: minBottom,
+    }
   }
 
   private onPointerMove = (e: PointerEvent) => {
     const bus = useBus.getState()
+    if (this.drag && this.dragPointerId !== null && e.pointerId !== this.dragPointerId) return
     if (!this.drag) {
       // hover feedback
       const hits = this.hitParts(e)
@@ -674,12 +711,19 @@ export class World {
     const doc = store.doc
 
     if (this.drag.kind === 'orbit') {
+      // same 5px slop as part clicks: a jittery deselect click stays a click
+      if (
+        !this.drag.moved &&
+        Math.abs(e.clientX - this.drag.startX) + Math.abs(e.clientY - this.drag.startY) > 5
+      ) {
+        this.drag.moved = true
+        useBus.getState().setActiveView(null)
+      }
       const dx = e.clientX - this.drag.lastX
       const dy = e.clientY - this.drag.lastY
-      if (Math.abs(dx) + Math.abs(dy) > 0) this.drag.moved = true
       this.drag.lastX = e.clientX
       this.drag.lastY = e.clientY
-      this.rig.orbitBy(-dx * 0.005, dy * 0.004)
+      if (this.drag.moved) this.rig.orbitBy(-dx * 0.005, dy * 0.004)
       return
     }
 
@@ -787,6 +831,9 @@ export class World {
               drag.startPos[2] + (dir.z * growth * drag.spec.sign) / 2,
             ]
           }
+          // nothing resizes down through the bench
+          const floor = worldBottomOffset(p)
+          if (p.position[1] < floor) p.position[1] = floor
         },
         { history: false },
       )
@@ -796,6 +843,7 @@ export class World {
         if (p) {
           // rebuild handle positions for the new size
           this.scene.remove(this.handleGroup)
+          disposeSubtree(this.handleGroup)
           this.handleGroup = buildHandles(p)
           this.syncHandleTransform(p)
           this.scene.add(this.handleGroup)
@@ -805,9 +853,7 @@ export class World {
     }
 
     if (this.drag.kind === 'lift') {
-      const hit = new THREE.Vector3()
-      if (!this.pointerRay(e).ray.intersectPlane(this.drag.plane, hit)) return
-      const rawDy = hit.y - this.drag.startHit.y
+      const rawDy = (this.drag.startClientY - e.clientY) * this.drag.worldPerPixel
       const dy = Math.max(snap(rawDy, doc.snapStep), -this.drag.maxDrop)
       const startPositions = this.drag.startPositions
       const ids = this.drag.ids
@@ -829,6 +875,8 @@ export class World {
   }
 
   private onPointerUp = (e: PointerEvent) => {
+    if (this.drag && this.dragPointerId !== null && e.pointerId !== this.dragPointerId) return
+    this.dragPointerId = null
     const store = useStore.getState()
     const drag = this.drag
     this.drag = null

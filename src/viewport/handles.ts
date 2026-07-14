@@ -52,9 +52,9 @@ export function handleSpecs(part: Part): HandleSpec[] {
       break
     case 'slot':
       for (const [key, axis, size] of [
-        ['length', 0, Math.max(d.length, d.width)],
+        ['length', 0, d.length],
         ['deep', 1, d.deep],
-        ['width', 2, d.width],
+        ['width', 2, Math.min(d.width, d.length)],
       ] as const) {
         for (const sign of [1, -1] as const) {
           const pos: [number, number, number] = [0, 0, 0]

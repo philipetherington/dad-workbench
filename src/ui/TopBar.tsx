@@ -52,12 +52,19 @@ export function TopBar({ onOpenProjects, onOpenMakeIt, onOpenHelp }: Props) {
       <button className="wb-btn" onClick={redo} disabled={!canRedo}>
         <RedoIcon /> Redo
       </button>
-      <span className={`wb-saved${saveState === 'saving' ? ' saving' : ''}`}>
-        {saveState === 'saving' ? 'Saving…' : 'All changes saved ✓'}
+      <span
+        className={`wb-saved${saveState === 'saving' ? ' saving' : ''}`}
+        style={saveState === 'error' ? { color: 'var(--red)', fontWeight: 700 } : undefined}
+      >
+        {saveState === 'saving'
+          ? 'Saving…'
+          : saveState === 'error'
+            ? 'Not saved — storage is full'
+            : 'All changes saved ✓'}
       </span>
       <div className="spacer" />
       <button className="wb-btn small" onClick={toggleUnits}>
-        {doc.units === 'in' ? 'Inches' : 'Millimeters'}
+        {doc.units === 'in' ? 'Show in millimeters' : 'Show in inches'}
       </button>
       <button className="wb-btn primary" onClick={onOpenMakeIt}>
         Make It…

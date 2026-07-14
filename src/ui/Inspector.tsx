@@ -48,6 +48,7 @@ function SummaryPanel() {
     const min = [Infinity, Infinity, Infinity]
     const max = [-Infinity, -Infinity, -Infinity]
     for (const p of result.parts) {
+      if (p.role !== 'solid') continue // cutout ghosts aren't part of the piece
       for (let i = 0; i < 3; i++) {
         min[i] = Math.min(min[i], p.bbox.min[i])
         max[i] = Math.max(max[i], p.bbox.max[i])
@@ -133,12 +134,7 @@ function MultiPanel() {
           </button>
         )}
         {gluedIds.size > 0 && (
-          <button
-            className="wb-btn wide"
-            onClick={() => {
-              for (const g of gluedIds) store.getState().unglue(g)
-            }}
-          >
+          <button className="wb-btn wide" onClick={() => store.getState().unglue([...gluedIds])}>
             Take Apart
           </button>
         )}
@@ -189,7 +185,10 @@ function SinglePanel({ part }: { part: Part }) {
         className="wb-project-name"
         style={{ maxWidth: 'none', fontSize: 18 }}
         value={part.name}
-        onChange={(e) => updateThis((p) => (p.name = e.target.value))}
+        onChange={(e) =>
+          // no history: renaming shouldn't cost one undo step per keystroke
+          store.getState().updateParts([part.id], (p) => (p.name = e.target.value), { history: false })
+        }
         spellCheck={false}
       />
 
@@ -319,20 +318,25 @@ function SinglePanel({ part }: { part: Part }) {
             <TiltIcon dir="right" /> Tilt Right
           </button>
         </div>
-        <div>
-          <div className="wb-field-label">Angle (spin on the bench)</div>
-          <div className="wb-chip-row">
-            {ANGLE_DETENTS.map((a) => (
-              <button
-                key={a}
-                className={`wb-chip${Math.abs(((part.rotation[1] % 360) + 360) % 360 - a) < 0.01 ? ' on' : ''}`}
-                onClick={() => updateThis((p) => (p.rotation = [p.rotation[0], a, p.rotation[2]]))}
-              >
-                {a}°
-              </button>
-            ))}
+        {Math.abs(part.rotation[0] % 360) < 0.01 && Math.abs(part.rotation[2] % 360) < 0.01 && (
+          // Only meaningful while the piece is upright — for a tipped piece,
+          // editing the Y angle directly is NOT a bench spin (the Turn
+          // buttons still work; they compose about the world axis).
+          <div>
+            <div className="wb-field-label">Angle (spin on the bench)</div>
+            <div className="wb-chip-row">
+              {ANGLE_DETENTS.map((a) => (
+                <button
+                  key={a}
+                  className={`wb-chip${Math.abs(((part.rotation[1] % 360) + 360) % 360 - a) < 0.01 ? ' on' : ''}`}
+                  onClick={() => updateThis((p) => (p.rotation = [p.rotation[0], a, p.rotation[2]]))}
+                >
+                  {a}°
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
         <button className="wb-btn small" onClick={() => updateThis(applyFlip)}>
           <FlipIcon /> Flip (mirror)
         </button>

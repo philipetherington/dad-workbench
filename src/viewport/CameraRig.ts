@@ -106,7 +106,11 @@ export class CameraRig {
     const size = bbox.getSize(new THREE.Vector3())
     const center = bbox.getCenter(new THREE.Vector3())
     const radius = Math.max(size.length() / 2, 120)
-    const dist = radius / Math.tan((this.camera.fov * DEG) / 2) * 1.25
+    // frame against the NARROWER of the vertical/horizontal view angles so a
+    // wide project still fits in a narrow viewport
+    const vHalf = (this.camera.fov * DEG) / 2
+    const hHalf = Math.atan(Math.tan(vHalf) * this.camera.aspect)
+    const dist = (radius / Math.tan(Math.min(vHalf, hHalf))) * 1.25
     this.distMin = radius * 0.35
     this.distMax = Math.max(dist * 4, 2500)
     this.distT = THREE.MathUtils.clamp(dist, this.distMin, this.distMax)
