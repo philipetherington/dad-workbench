@@ -1,7 +1,24 @@
-// Browser file helpers: save, open, print. No document-model logic here.
+// Saving, opening, and printing. In the Mac app these go through real macOS
+// dialogs and the real print panel; in a browser they fall back to blob
+// downloads, a file input, and a print iframe. No document-model logic here.
 
-export function saveBlob(filename: string, data: ArrayBuffer | string, mime: string): void {
-  const blob = new Blob([data], { type: mime })
+import { native, type FileFilter } from './native'
+
+/**
+ * Save a file. Returns the path written in the Mac app, '' in a browser
+ * (which cannot know where the download landed), or null if cancelled.
+ */
+export async function saveBlob(
+  filename: string,
+  data: ArrayBuffer | string,
+  mime: string,
+  filters?: FileFilter[],
+): Promise<string | null> {
+  if (native) {
+    const payload = typeof data === 'string' ? data : new Uint8Array(data)
+    return native.saveExport(filename, payload, filters)
+  }
+  const blob = new Blob([data as BlobPart], { type: mime })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -10,9 +27,14 @@ export function saveBlob(filename: string, data: ArrayBuffer | string, mime: str
   a.click()
   a.remove()
   URL.revokeObjectURL(url)
+  return ''
 }
 
+/** Open a project file. Resolves its text, or null if cancelled. */
 export function openTextFile(accept: string): Promise<string | null> {
+  if (native) {
+    return native.openProject().then((f) => (f ? f.contents : null))
+  }
   return new Promise((resolve) => {
     const input = document.createElement('input')
     input.type = 'file'
@@ -41,6 +63,10 @@ export function openTextFile(accept: string): Promise<string | null> {
 }
 
 export function printHTML(html: string): void {
+  if (native) {
+    void native.printHTML(html)
+    return
+  }
   const iframe = document.createElement('iframe')
   iframe.style.position = 'fixed'
   iframe.style.right = '100%'

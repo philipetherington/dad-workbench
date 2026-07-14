@@ -289,6 +289,21 @@ button { font: inherit; color: inherit; }
 .wb-btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .wb-btn-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
 
+/* Narrow columns can't hold an icon and a label side by side — stack them,
+   and let the words wrap instead of spilling out of the button. */
+.wb-btn-grid-3 .wb-btn,
+.wb-btn-grid .wb-btn {
+  flex-direction: column;
+  gap: 4px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.15;
+  text-align: center;
+  font-size: 15px;
+  padding: 8px 6px;
+  min-height: 62px;
+}
+
 .wb-note {
   font-size: 15.5px;
   line-height: 1.4;

@@ -14,6 +14,7 @@ import { cutListHTML } from '../exporters/cutlist'
 import { serializeDoc, useStore } from '../model/store'
 import { useBus } from '../viewport/bus'
 import { printHTML, saveBlob } from './files'
+import { baseName, isNative } from './native'
 
 /** Project name -> a safe file name like "Garden bench.stl". */
 function makeFilename(name: string, ext: string): string {
@@ -127,9 +128,16 @@ export function MakeItSheet({ open, onClose }: { open: boolean; onClose: () => v
 
   const modelBlocked = !ready || evalError !== null || positions === null
 
-  const saveAndToast = (filename: string, data: ArrayBuffer | string, mime: string) => {
-    saveBlob(filename, data, mime)
-    useBus.getState().toast('Saved ' + filename)
+  const saveAndToast = async (
+    filename: string,
+    data: ArrayBuffer | string,
+    mime: string,
+    filters?: { name: string; extensions: string[] }[],
+  ) => {
+    const written = await saveBlob(filename, data, mime, filters)
+    // null = the user cancelled the save dialog; say nothing
+    if (written === null) return
+    useBus.getState().toast('Saved ' + (written ? baseName(written) : filename))
   }
 
   const doCutList = () => {
@@ -139,7 +147,9 @@ export function MakeItSheet({ open, onClose }: { open: boolean; onClose: () => v
   const doSTL = () => {
     if (!positions) return
     const name = makeFilename(useStore.getState().doc.name, 'stl')
-    saveAndToast(name, exportSTL(positions), 'model/stl')
+    void saveAndToast(name, exportSTL(positions), 'model/stl', [
+      { name: '3D print file', extensions: ['stl'] },
+    ])
   }
 
   const doDXF = () => {
@@ -152,19 +162,25 @@ export function MakeItSheet({ open, onClose }: { open: boolean; onClose: () => v
       return
     }
     const name = makeFilename(doc.name, 'dxf')
-    saveAndToast(name, exportDXF(contours), 'application/dxf')
+    void saveAndToast(name, exportDXF(contours), 'application/dxf', [
+      { name: 'Shop drawing', extensions: ['dxf'] },
+    ])
   }
 
   const doProjectFile = () => {
     const doc = useStore.getState().doc
-    const name = makeFilename(doc.name, 'workbench.json')
-    saveAndToast(name, serializeDoc(doc), 'application/json')
+    const name = makeFilename(doc.name, isNative ? 'workbench' : 'workbench.json')
+    void saveAndToast(name, serializeDoc(doc), 'application/json', [
+      { name: 'Workbench Project', extensions: ['workbench'] },
+    ])
   }
 
   const doSCAD = () => {
     const doc = useStore.getState().doc
     const name = makeFilename(doc.name, 'scad')
-    saveAndToast(name, exportSCAD(doc), 'text/plain')
+    void saveAndToast(name, exportSCAD(doc), 'text/plain', [
+      { name: 'OpenSCAD file', extensions: ['scad'] },
+    ])
   }
 
   return (

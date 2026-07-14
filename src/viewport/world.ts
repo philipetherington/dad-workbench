@@ -79,6 +79,7 @@ export class World {
   private mount: HTMLElement
   private labelLayer: HTMLElement
 
+  private sun!: THREE.DirectionalLight
   private benchGroup = new THREE.Group()
   private benchUnits: string | null = null
   private partsGroup = new THREE.Group()
@@ -117,21 +118,17 @@ export class World {
     this.rig = new CameraRig(1)
     this.scene.fog = new THREE.Fog('#e9e4dc', 6000, 16000)
 
-    // lights
+    // lights — the sun's shadow frustum is refitted to the work every time the
+    // scene changes (a fixed, bench-sized frustum wastes almost all of the
+    // shadow map on empty wood and shows as banding across the benchtop)
     const hemi = new THREE.HemisphereLight('#fdf6ea', '#9a8a76', 1.05)
     this.scene.add(hemi)
     const sun = new THREE.DirectionalLight('#fff2dc', 1.6)
-    sun.position.set(900, 1600, 700)
     sun.castShadow = true
-    sun.shadow.mapSize.set(2048, 2048)
-    const ext = 1400
-    sun.shadow.camera.left = -ext
-    sun.shadow.camera.right = ext
-    sun.shadow.camera.top = ext
-    sun.shadow.camera.bottom = -ext
-    sun.shadow.camera.far = 5000
-    sun.shadow.bias = -0.0004
+    sun.shadow.mapSize.set(4096, 4096)
     this.scene.add(sun)
+    this.scene.add(sun.target)
+    this.sun = sun
 
     this.scene.add(this.benchGroup)
     this.scene.add(this.partsGroup)
@@ -280,7 +277,47 @@ export class World {
     }
     this.applyCutoutVisibility()
     this.refreshSelectionVisuals()
+    this.fitSunToScene()
     if (!this.drag) this.rig.driftTargetToward(this.sceneBBox())
+  }
+
+  /**
+   * Aim the sun at the work.
+   *
+   * The frustum must cover every surface that RECEIVES a shadow, not just the
+   * pieces that cast one: fragments outside it sample the shadow map's clamped
+   * edge texel, which paints a staircase of fake shadow across the benchtop.
+   * The whole bench receives, so the frustum never shrinks below the bench —
+   * it only grows, for projects bigger than the bench itself.
+   */
+  private fitSunToScene() {
+    const box = this.sceneBBox()
+    const center = box.getCenter(new THREE.Vector3())
+    const radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 150)
+    const ext = Math.max(BENCH_SIZE / 2 + 60, radius * 1.4)
+
+    const dir = new THREE.Vector3(0.55, 1.15, 0.42).normalize()
+    const distance = Math.max(ext * 2.2, radius * 3)
+    // keep the sun centred over the BENCH, not the work, so the frustum that
+    // covers the bench stays put and the shadows don't swim as pieces move
+    const pivot = new THREE.Vector3(center.x * 0.25, 0, center.z * 0.25)
+    this.sun.position.copy(pivot).addScaledVector(dir, distance)
+    this.sun.target.position.copy(pivot)
+    this.sun.target.updateMatrixWorld()
+
+    const cam = this.sun.shadow.camera
+    cam.left = -ext
+    cam.right = ext
+    cam.top = ext
+    cam.bottom = -ext
+    cam.near = distance * 0.15
+    cam.far = distance + ext * 3
+    cam.updateProjectionMatrix()
+
+    // World units are millimetres. The depth bias has to be scaled to that or
+    // the benchtop self-shadows in bands; normalBias does the real work here.
+    this.sun.shadow.bias = -0.0006
+    this.sun.shadow.normalBias = 1.8
   }
 
   private disposeVisual(v: PartVisual) {

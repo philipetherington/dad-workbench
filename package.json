@@ -1,14 +1,22 @@
 {
   "name": "workbench",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "Design woodworking projects and 3D-printable parts, simply.",
+  "author": {
+    "name": "Philip Etherington"
+  },
+  "homepage": "https://philipetherington.com",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "dev:app": "bash scripts/dev-electron.sh",
+    "build:mac": "bash scripts/build-mac.sh"
   },
   "dependencies": {
     "manifold-3d": "^3.5.1",
@@ -23,9 +31,13 @@
     "@types/react-dom": "^19.2.3",
     "@types/three": "^0.185.1",
     "@vitejs/plugin-react": "^6.0.3",
+    "concurrently": "^10.0.3",
+    "electron": "^43.1.1",
+    "electron-builder": "^26.15.3",
     "oxlint": "^1.71.0",
     "typescript": "~6.0.2",
     "vite": "^8.1.1",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "wait-on": "^9.0.10"
   }
 }

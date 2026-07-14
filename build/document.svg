@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Workbench project document icon.
+       The classic Mac page with a folded top-right corner, carrying a small
+       board-and-shelf glyph in the lower two thirds. No lettering: the glyph
+       has to do the work at 32x32, so it is a frame, two openings, and the
+       orange shelf as the single accent.
+       Palette: wood #c9a06a / #b98a54 / #8d5a34, ink #2b2318, accent #ff7a1a.
+       Note: XML forbids double hyphens inside comments. Do not add them. -->
+
+  <g stroke="#2b2318" stroke-linejoin="round" stroke-linecap="round">
+
+    <!-- page -->
+    <path d="M190,84 A24,24 0 0 1 214,60 H674 L834,220 V940 A24,24 0 0 1 810,964
+             H214 A24,24 0 0 1 190,940 Z"
+          fill="#ffffff" stroke-width="10"/>
+
+    <!-- turned corner -->
+    <path d="M674,60 L834,220 H698 A24,24 0 0 1 674,196 Z"
+          fill="#e8dcc8" stroke-width="10"/>
+
+    <!-- board and shelf, centred in the lower two thirds -->
+    <g>
+      <!-- ink keyline so the glyph holds together when small -->
+      <path d="M302,472 A10,10 0 0 1 312,462 H712 A10,10 0 0 1 722,472 V812 H302 Z"
+            fill="#2b2318" stroke-width="22"/>
+
+      <!-- feet -->
+      <path d="M322,812 H380 V848 H322 Z" fill="#8d5a34" stroke-width="13"/>
+      <path d="M644,812 H702 V848 H644 Z" fill="#8d5a34" stroke-width="13"/>
+
+      <!-- carcase -->
+      <path d="M302,472 A10,10 0 0 1 312,462 H712 A10,10 0 0 1 722,472 V802
+               A10,10 0 0 1 712,812 H312 A10,10 0 0 1 302,802 Z"
+            fill="#b98a54" stroke-width="15"/>
+
+      <!-- the two openings -->
+      <path d="M352,512 H672 V624 H352 Z" fill="#f4efe7" stroke-width="13"/>
+      <path d="M352,664 H672 V762 H352 Z" fill="#f4efe7" stroke-width="13"/>
+
+      <!-- the shelf: single orange accent -->
+      <path d="M352,624 H672 V664 H352 Z" fill="#ff7a1a" stroke-width="13"/>
+    </g>
+
+  </g>
+</svg>

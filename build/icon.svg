@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Workbench app icon.
+       Two boards locked together with through dovetails: light board left, dark
+       board right, one contrasting tail in orange as the single accent.
+       Chosen over a hand plane because a joint is pure geometry: fat trapezoids
+       and a hard light/dark value break, which is what still reads at 32x32 in
+       the Dock. It is also the subject of the app.
+       The tails run deep (190 units, a true 1:6 dovetail slope) so the interlock
+       is unmistakable; shallow tails just read as a wiggly seam.
+       Palette: wood #c9a06a / #b98a54 / #8d5a34, ink #2b2318, accent #ff7a1a.
+       Note: XML forbids double hyphens inside comments. Do not add them. -->
+
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f7ede0"/>
+      <stop offset="1" stop-color="#e8d5bb"/>
+    </linearGradient>
+
+    <clipPath id="leftBoard">
+      <path d="M182,304 A22,22 0 0 1 204,282 H420 V348 L610,318 V426 L420,396 V488
+               L610,458 V566 L420,536 V628 L610,598 V706 L420,676 V742 H204
+               A22,22 0 0 1 182,720 Z"/>
+    </clipPath>
+    <clipPath id="rightBoard">
+      <path d="M420,282 H820 A22,22 0 0 1 842,304 V720 A22,22 0 0 1 820,742 H420 Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- Big Sur rounded square body. No baked drop shadow. -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+
+  <g stroke="#2b2318" stroke-linejoin="round" stroke-linecap="round">
+
+    <!-- ink keyline under the whole panel -->
+    <path d="M182,304 A22,22 0 0 1 204,282 H820 A22,22 0 0 1 842,304 V720
+             A22,22 0 0 1 820,742 H204 A22,22 0 0 1 182,720 Z"
+          fill="#2b2318" stroke-width="24"/>
+
+    <!-- dark board: its pins flare the opposite way to the tails -->
+    <g clip-path="url(#rightBoard)">
+      <path d="M420,282 H820 A22,22 0 0 1 842,304 V720 A22,22 0 0 1 820,742 H420 Z"
+            fill="#8d5a34" stroke="none"/>
+      <g stroke="#5f3c22" stroke-width="7" opacity="0.3" fill="none">
+        <path d="M400,352 H860"/>
+        <path d="M400,494 H860"/>
+        <path d="M400,636 H860"/>
+      </g>
+      <path d="M420,706 H842 V742 H420 Z" fill="#5f3c22" stroke="none" opacity="0.75"/>
+    </g>
+
+    <!-- light board: tails ride over the dark board -->
+    <g>
+      <path d="M182,304 A22,22 0 0 1 204,282 H420 V348 L610,318 V426 L420,396 V488
+               L610,458 V566 L420,536 V628 L610,598 V706 L420,676 V742 H204
+               A22,22 0 0 1 182,720 Z"
+            fill="#c9a06a" stroke-width="16"/>
+      <g clip-path="url(#leftBoard)">
+        <g stroke="#8d5a34" stroke-width="7" opacity="0.22" fill="none">
+          <path d="M170,364 H620"/>
+          <path d="M170,512 H620"/>
+          <path d="M170,648 H620"/>
+        </g>
+        <path d="M182,706 H610 V742 H182 Z" fill="#b98a54" stroke="none" opacity="0.8"/>
+      </g>
+    </g>
+
+    <!-- the contrasting tail: single orange accent, dead centre -->
+    <path d="M420,488 L610,458 V566 L420,536 Z" fill="#ff7a1a" stroke-width="16"/>
+
+  </g>
+</svg>

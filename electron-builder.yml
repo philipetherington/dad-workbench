@@ -1,0 +1,59 @@
+# Workbench — macOS packaging.
+#
+# One target Mac: Apple silicon. One deliverable: a .dmg you drag into
+# Applications. No code-signing identity, no notarisation, no developer
+# account — scripts/build-mac.sh applies an ad-hoc signature afterwards so
+# arm64 macOS will actually launch the binary.
+
+appId: com.philipetherington.workbench
+productName: Workbench
+copyright: (c) 2026 Philip Etherington
+
+directories:
+  output: release
+  buildResources: build
+
+# Only what the app needs at runtime. Production dependencies are added by
+# electron-builder automatically; src/, tests and dev config never ship.
+files:
+  - dist/**
+  - electron/**
+  - package.json
+
+asar: true
+
+mac:
+  category: public.app-category.graphics-design
+  icon: build/icon.icns
+  darkModeSupport: false
+  # Unsigned: build-mac.sh runs `codesign --sign -` on the finished app.
+  identity: null
+  target:
+    - target: dmg
+      arch:
+        - arm64
+    - target: dir
+      arch:
+        - arm64
+  extendInfo:
+    NSHumanReadableCopyright: (c) 2026 Philip Etherington
+  fileAssociations:
+    - ext: workbench
+      name: Workbench Project
+      role: Editor
+      rank: Owner
+      icon: build/document.icns
+
+dmg:
+  title: Workbench
+  window:
+    width: 560
+    height: 380
+  contents:
+    - x: 140
+      y: 200
+      type: file
+    - x: 400
+      y: 200
+      type: link
+      path: /Applications

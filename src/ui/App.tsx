@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react'
 import { Viewport } from '../viewport/Viewport'
-import { useBus } from '../viewport/bus'
+import { useBus, type ViewName } from '../viewport/bus'
 import { useStore } from '../model/store'
 import { serializeDoc } from '../model/store'
+import { cutListHTML } from '../exporters/cutlist'
 import { TopBar } from './TopBar'
 import { LeftPanel } from './LeftPanel'
 import { Inspector } from './Inspector'
@@ -14,6 +15,15 @@ import { ProjectsSheet } from './Projects'
 import { HelpSheet } from './Help'
 import { Coach } from './Coach'
 import { currentProjectId, saveProject } from './projectsStore'
+import { native } from './native'
+import { printHTML } from './files'
+import { saveAs, saveToFile, startNativeDocSync } from './docFile'
+import {
+  loadTemplate,
+  openHandedFile,
+  openProjectFlow,
+  startFresh,
+} from './projectFlows'
 
 function Overlays() {
   const flashes = useBus((s) => s.flashes)
@@ -108,6 +118,112 @@ export function App() {
       serializeDoc(useStore.getState().doc)
     } catch (e) {
       console.error(e)
+    }
+  }, [])
+
+  // ---- native app: menu bar, files handed over by Finder, title sync ----
+
+  useEffect(() => {
+    if (!native) return
+    return startNativeDocSync()
+  }, [])
+
+  useEffect(() => {
+    if (!native) return
+    const offOpen = native.onOpenFile(({ path, contents }) => openHandedFile(path, contents))
+    const offMenu = native.onMenu((command) => {
+      const s = useStore.getState()
+      const camera = useBus.getState().camera
+
+      if (command.startsWith('view:')) {
+        const what = command.slice(5)
+        if (what === 'showEverything') {
+          useBus.getState().setActiveView('corner')
+          camera?.showEverything()
+        } else if (what === 'zoomIn') camera?.zoom(0.8)
+        else if (what === 'zoomOut') camera?.zoom(1.25)
+        else {
+          useBus.getState().setActiveView(what as ViewName)
+          camera?.goTo(what as ViewName)
+        }
+        return
+      }
+
+      switch (command) {
+        case 'new':
+          startFresh()
+          break
+        case 'open':
+          void openProjectFlow()
+          break
+        case 'save':
+          void saveToFile(true)
+          break
+        case 'saveAs':
+          void saveAs()
+          break
+        case 'makeIt':
+          setSheet('makeit')
+          break
+        case 'printCutList':
+          printHTML(cutListHTML(s.doc))
+          break
+        case 'undo':
+          s.undo()
+          break
+        case 'redo':
+          s.redo()
+          break
+        case 'duplicate':
+          s.duplicateSelection()
+          break
+        case 'delete': {
+          if (s.selection.length === 0) break
+          const n = s.selection.length
+          const name =
+            n === 1 ? (s.doc.parts.find((p) => p.id === s.selection[0])?.name ?? 'piece') : `${n} pieces`
+          s.deleteSelection()
+          useBus.getState().toast(`Removed ${n === 1 ? `'${name}'` : name}`, 'Put It Back', () => s.undo())
+          break
+        }
+        case 'help:basics':
+          setReplayNonce((v) => v + 1)
+          break
+        case 'help:bookshelf':
+          loadTemplate('bookshelf')
+          break
+        case 'help:open':
+          setSheet('help')
+          break
+      }
+    })
+    return () => {
+      offOpen()
+      offMenu()
+    }
+  }, [])
+
+  // drop a .workbench file anywhere on the window
+  useEffect(() => {
+    const onDragOver = (e: DragEvent) => {
+      e.preventDefault()
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+    }
+    const onDrop = (e: DragEvent) => {
+      const file = e.dataTransfer?.files?.[0]
+      if (!file) return
+      e.preventDefault()
+      const path = native?.pathForFile(file) ?? null
+      file.text().then(
+        (contents) => openHandedFile(path, contents),
+        () => useBus.getState().toast("That file couldn't be read"),
+      )
+    }
+    window.addEventListener('dragover', onDragOver)
+    window.addEventListener('drop', onDrop)
+    return () => {
+      window.removeEventListener('dragover', onDragOver)
+      window.removeEventListener('drop', onDrop)
     }
   }, [])
 
