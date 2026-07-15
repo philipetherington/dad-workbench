@@ -36,6 +36,9 @@ interface BusState {
   setCamera: (c: CameraApi | null) => void
   showCutouts: boolean
   setShowCutouts: (v: boolean) => void
+  /** Whole-scene wireframe view (quiet power feature, toggled with 'z'). */
+  wireframe: boolean
+  setWireframe: (v: boolean) => void
   kernelState: 'loading' | 'ready' | 'failed'
   setKernelState: (s: 'loading' | 'ready' | 'failed') => void
   flashes: Flash[]
@@ -64,6 +67,8 @@ export const useBus = create<BusState>((set) => ({
   setCamera: (camera) => set({ camera }),
   showCutouts: true,
   setShowCutouts: (showCutouts) => set({ showCutouts }),
+  wireframe: false,
+  setWireframe: (wireframe) => set({ wireframe }),
   kernelState: 'loading',
   setKernelState: (kernelState) => set({ kernelState }),
   flashes: [],

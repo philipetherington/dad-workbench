@@ -16,12 +16,13 @@ import { positionsToGeometry } from '../engine/toThree'
 import { kernelReady } from '../engine/kernel'
 import { useBus } from './bus'
 import { CameraRig } from './CameraRig'
-import { benchMaterial, stripeTexture, BENCH_SIZE } from './textures'
+import { benchMaterial, BENCH_SIZE } from './textures'
 import { buildHandles, buildLiftHandle, type HandleSpec } from './handles'
 
 const MAGNET_MM = 6.35 // 1/4" capture radius for face magnetism
 const SELECT_ORANGE = new THREE.Color('#ff7a1a')
 const OVERLAP_AMBER = new THREE.Color('#d99a00')
+const HOLE_RED = new THREE.Color('#c0392b')
 
 /**
  * A soft round blob, dark in the centre fading to nothing — the alpha falloff
@@ -60,6 +61,8 @@ function disposeSubtree(root: THREE.Object3D) {
 interface PartVisual {
   mesh: THREE.Mesh
   edges: THREE.LineSegments | null
+  /** Permanent red cage for cutouts (their whole visual identity). */
+  wire: THREE.LineSegments | null
 }
 
 type Drag =
@@ -112,7 +115,6 @@ export class World {
   private handlePartId: string | null = null
   private liftHandle = buildLiftHandle()
   private dropLine: THREE.Line
-  private stripes = stripeTexture()
 
   private drag: Drag | null = null
   private dragPointerId: number | null = null
@@ -204,6 +206,7 @@ export class World {
     this.unsubs.push(
       useBus.subscribe((s, prev) => {
         if (s.showCutouts !== prev.showCutouts) this.applyCutoutVisibility()
+        if (s.wireframe !== prev.wireframe) this.applyWireframeMode()
         if (s.kernelState === 'ready' && prev.kernelState !== 'ready') this.markDirty()
         if (s.hoveredId !== prev.hoveredId) this.applyHoverTint()
       }),
@@ -234,7 +237,6 @@ export class World {
     this.contactShadowTex.dispose()
     this.dropLine.geometry.dispose()
     ;(this.dropLine.material as THREE.Material).dispose()
-    this.stripes.dispose()
     this.renderer.dispose()
     this.mount.removeChild(this.renderer.domElement)
     this.mount.removeChild(this.labelLayer)
@@ -267,35 +269,54 @@ export class World {
       seen.add(p.id)
       let vis = this.visuals.get(p.id)
       const part = doc.parts.find((q) => q.id === p.id)!
+      // role flipped (Solid ↔ Cuts wood away): the whole visual identity
+      // changes, so rebuild it rather than keep the stale material
+      if (vis && vis.mesh.userData.role !== part.role) {
+        this.disposeVisual(vis)
+        this.visuals.delete(p.id)
+        vis = undefined
+      }
       if (!vis) {
+        // Cutouts render as red WIREFRAME, not solids: the cut itself is
+        // already subtracted from every piece live, and a solid ghost would
+        // hide the very cavity it makes. A whisper of translucent fill stays
+        // for clicking/hover — lines alone are miserable to pick.
         const mat =
           part.role === 'hole'
-            ? new THREE.MeshStandardMaterial({
-                map: this.stripes,
+            ? new THREE.MeshBasicMaterial({
+                color: HOLE_RED,
                 transparent: true,
-                opacity: 0.75,
+                opacity: 0.08,
                 depthWrite: false,
-                roughness: 0.6,
                 side: THREE.DoubleSide,
               })
-            : new THREE.MeshStandardMaterial({ roughness: 0.75, metalness: 0.02 })
+            : new THREE.MeshStandardMaterial({
+                roughness: 0.75,
+                metalness: 0.02,
+                wireframe: useBus.getState().wireframe,
+              })
         const mesh = new THREE.Mesh(new THREE.BufferGeometry(), mat)
         mesh.userData.partId = p.id
-        vis = { mesh, edges: null }
+        vis = { mesh, edges: null, wire: null }
         this.visuals.set(p.id, vis)
         this.partsGroup.add(mesh)
       }
       vis.mesh.geometry.dispose()
       vis.mesh.geometry = positionsToGeometry(p.positions)
       if (part.role === 'hole') {
-        // stripe UVs: project along world X/Y so stripes stay a steady size
-        const pos = p.positions
-        const uv = new Float32Array((pos.length / 3) * 2)
-        for (let i = 0; i < pos.length / 3; i++) {
-          uv[i * 2] = (pos[i * 3] + pos[i * 3 + 2]) / 40
-          uv[i * 2 + 1] = pos[i * 3 + 1] / 40
+        // rebuild the wireframe cage for the new shape
+        if (vis.wire) {
+          vis.wire.geometry.dispose()
+          vis.wire.geometry = new THREE.EdgesGeometry(vis.mesh.geometry, 5)
+        } else {
+          const wire = new THREE.LineSegments(
+            new THREE.EdgesGeometry(vis.mesh.geometry, 5),
+            new THREE.LineBasicMaterial({ color: HOLE_RED }),
+          )
+          wire.userData.partId = p.id
+          vis.wire = wire
+          this.partsGroup.add(wire)
         }
-        vis.mesh.geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2))
       }
       vis.mesh.userData.bbox = p.bbox
       vis.mesh.userData.role = p.role
@@ -377,6 +398,11 @@ export class World {
       ;(v.edges.material as THREE.Material).dispose()
       this.partsGroup.remove(v.edges)
     }
+    if (v.wire) {
+      v.wire.geometry.dispose()
+      ;(v.wire.material as THREE.Material).dispose()
+      this.partsGroup.remove(v.wire)
+    }
   }
 
   private rebuildBenchIfNeeded(doc: Doc) {
@@ -437,10 +463,17 @@ export class World {
         )
         mat.emissiveIntensity = selected ? 0.22 : overlapIds.has(id) ? 0.35 : 0
       } else {
-        mat.opacity = selected ? 0.9 : 0.75
+        // a cutout's identity is its wire cage: orange when chosen, red otherwise
+        ;(mat as unknown as THREE.MeshBasicMaterial).opacity = selected ? 0.16 : 0.08
+        if (vis.wire) {
+          ;(vis.wire.material as THREE.LineBasicMaterial).color.set(
+            selected ? SELECT_ORANGE : HOLE_RED,
+          )
+        }
       }
-      // orange edge outline for selected parts
-      if (selected && !vis.edges) {
+      // orange edge outline for selected solids (cutouts already have a cage)
+      const wantEdges = selected && part.role === 'solid'
+      if (wantEdges && !vis.edges) {
         const edges = new THREE.LineSegments(
           new THREE.EdgesGeometry(vis.mesh.geometry, 25),
           new THREE.LineBasicMaterial({ color: SELECT_ORANGE, linewidth: 2 }),
@@ -448,16 +481,17 @@ export class World {
         edges.renderOrder = 900
         vis.edges = edges
         this.partsGroup.add(edges)
-      } else if (selected && vis.edges) {
+      } else if (wantEdges && vis.edges) {
         vis.edges.geometry.dispose()
         vis.edges.geometry = new THREE.EdgesGeometry(vis.mesh.geometry, 25)
-      } else if (!selected && vis.edges) {
+      } else if (!wantEdges && vis.edges) {
         vis.edges.geometry.dispose()
         ;(vis.edges.material as THREE.Material).dispose()
         this.partsGroup.remove(vis.edges)
         vis.edges = null
       }
     }
+    this.applyWireframeMode()
     this.applyHoverTint()
     this.rebuildHandles()
     this.rebuildLabels()
@@ -483,7 +517,20 @@ export class World {
   private applyCutoutVisibility() {
     const show = useBus.getState().showCutouts
     for (const [, vis] of this.visuals) {
-      if (vis.mesh.userData.role === 'hole') vis.mesh.visible = show
+      if (vis.mesh.userData.role === 'hole') {
+        vis.mesh.visible = show
+        if (vis.wire) vis.wire.visible = show
+      }
+    }
+  }
+
+  /** 'z' — quiet whole-scene wireframe view for the power user. */
+  private applyWireframeMode() {
+    const on = useBus.getState().wireframe
+    for (const [, vis] of this.visuals) {
+      if (vis.mesh.userData.role === 'solid') {
+        ;(vis.mesh.material as THREE.MeshStandardMaterial).wireframe = on
+      }
     }
   }
 

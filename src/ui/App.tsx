@@ -83,6 +83,9 @@ export function App() {
         e.preventDefault()
         if (e.shiftKey) s.redo()
         else s.undo()
+      } else if (e.key.toLowerCase() === 'z' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        // quiet power feature: whole-scene wireframe view
+        useBus.getState().setWireframe(!useBus.getState().wireframe)
       } else if (e.key === 'Backspace' || e.key === 'Delete') {
         if (s.selection.length > 0) {
           e.preventDefault()
