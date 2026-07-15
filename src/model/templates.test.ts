@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
+import { initKernel } from '../engine/kernel'
+import { evaluateScene } from '../engine/evaluate'
 import { TEMPLATES } from './templates'
 import { DIM_SPECS, MAX_DIM_MM, worldSize } from './types'
 import type { Doc, Part } from './types'
@@ -34,6 +36,21 @@ const RESTING: Record<string, string[]> = {
   bookshelf: ['Left side', 'Right side', 'Shelf 1'],
   bracket: ['Base plate'],
   doorstop: ['Wedge'],
+  'wall-cabinet': ['Left side', 'Right side', 'Bottom'],
+}
+
+/**
+ * Solid pairs allowed to interpenetrate BY DESIGN: boards seated in joinery
+ * cuts (a shelf in its dados, a back in its rabbets) overlap the host board's
+ * bounding box exactly where the cutter removes material.
+ */
+const ALLOWED_OVERLAPS: Record<string, [string, string][]> = {
+  'wall-cabinet': [
+    ['Fixed shelf', 'Left side'],
+    ['Fixed shelf', 'Right side'],
+    ['Back panel', 'Left side'],
+    ['Back panel', 'Right side'],
+  ],
 }
 
 function byName(doc: Doc, name: string): Part {
@@ -82,10 +99,14 @@ describe.each(TEMPLATES)('template $id', (tpl) => {
     }
   })
 
-  it('has no interpenetrating solids', () => {
+  it('has no interpenetrating solids beyond designed joinery engagements', () => {
+    const allowed = ALLOWED_OVERLAPS[tpl.id] ?? []
+    const isAllowed = (a: Part, b: Part) =>
+      allowed.some(([x, y]) => (x === a.name && y === b.name) || (x === b.name && y === a.name))
     const solids = doc.parts.filter((p) => p.role === 'solid')
     for (let i = 0; i < solids.length; i++) {
       for (let j = i + 1; j < solids.length; j++) {
+        if (isAllowed(solids[i], solids[j])) continue
         const depth = overlapDepth(aabb(solids[i]), aabb(solids[j]))
         expect(depth, `${solids[i].name} vs ${solids[j].name}`).toBeLessThanOrEqual(TOL)
       }
@@ -182,5 +203,159 @@ describe('doorstop specifics', () => {
     expect(w.dims.length).toBeCloseTo(5 * IN, 6)
     expect(w.dims.width).toBeCloseTo(1.5 * IN, 6)
     expect(w.dims.height).toBeCloseTo(1.25 * IN, 6)
+  })
+})
+
+describe('wall-cabinet specifics', () => {
+  const doc = TEMPLATES.find((t) => t.id === 'wall-cabinet')!.build()
+  const THICK = 0.75 * IN
+  const EIGHTH3 = 0.375 * IN // 3/8"
+
+  it('uses inch units and stays unglued', () => {
+    expect(doc.units).toBe('in')
+    expect(doc.glues).toHaveLength(0)
+    for (const p of doc.parts) expect(p.glueId, p.name).toBeUndefined()
+  })
+
+  it('assembles the carcass flush: top and bottom between the sides', () => {
+    const left = aabb(byName(doc, 'Left side'))
+    const right = aabb(byName(doc, 'Right side'))
+    for (const name of ['Top', 'Bottom']) {
+      const b = aabb(byName(doc, name))
+      expect(Math.abs(b.min[0] - left.max[0]), name).toBeLessThanOrEqual(TOL)
+      expect(Math.abs(b.max[0] - right.min[0]), name).toBeLessThanOrEqual(TOL)
+    }
+    // top face of the Top flush with the side tops; Bottom is bench-resting
+    const top = aabb(byName(doc, 'Top'))
+    expect(Math.abs(top.max[1] - left.max[1])).toBeLessThanOrEqual(TOL)
+    expect(Math.abs(top.max[1] - 30 * IN)).toBeLessThanOrEqual(TOL)
+  })
+
+  it('attaches every cut and hardware item to a host that exists', () => {
+    const attached = doc.parts.filter((p) => p.role === 'hole' || p.role === 'hardware')
+    expect(attached).toHaveLength(6) // 2 rabbets + 2 dados + 2 pin rows
+    for (const p of attached) {
+      expect(p.hostId, p.name).toBeTruthy()
+      const host = doc.parts.find((q) => q.id === p.hostId)
+      expect(host, p.name).toBeDefined()
+      expect(host!.role, p.name).toBe('solid')
+    }
+  })
+
+  it('hugs each 3/8 x 3/8 back rabbet against its side back inner edge', () => {
+    for (const [name, hostName] of [
+      ['Back rabbet left', 'Left side'],
+      ['Back rabbet right', 'Right side'],
+    ] as const) {
+      const rabbet = byName(doc, name)
+      expect(rabbet.kind).toBe('rabbet')
+      expect(rabbet.role).toBe('hole')
+      expect(rabbet.hostId).toBe(byName(doc, hostName).id)
+      expect(rabbet.dims.width).toBeCloseTo(EIGHTH3, 6)
+      expect(rabbet.dims.deep).toBeCloseTo(EIGHTH3, 6)
+
+      const host = aabb(byName(doc, hostName))
+      const box = aabb(rabbet)
+      // flush with the back face, cut into the inner half of the thickness
+      expect(Math.abs(box.max[2] - host.max[2]), name).toBeLessThanOrEqual(TOL)
+      expect(box.min[0], name).toBeGreaterThanOrEqual(host.min[0] - TOL)
+      expect(box.max[0], name).toBeLessThanOrEqual(host.max[0] + TOL)
+      // the span (local X) runs the side's full height (dims.span fallback;
+      // hosted evaluation stretches it +2mm on its own)
+      expect(box.max[1] - box.min[1], name).toBeCloseTo(30 * IN, 4)
+    }
+  })
+
+  it('cuts a 3/4 wide x 3/8 deep dado into each side at mid-height', () => {
+    for (const [name, hostName] of [
+      ['Shelf dado left', 'Left side'],
+      ['Shelf dado right', 'Right side'],
+    ] as const) {
+      const dado = byName(doc, name)
+      expect(dado.kind).toBe('dado')
+      expect(dado.role).toBe('hole')
+      expect(dado.hostId).toBe(byName(doc, hostName).id)
+      expect(dado.dims.width).toBeCloseTo(THICK, 6)
+      expect(dado.dims.deep).toBeCloseTo(EIGHTH3, 6)
+
+      const host = aabb(byName(doc, hostName))
+      const box = aabb(dado)
+      // channel width takes the shelf thickness, centered at mid-height
+      expect(Math.abs((box.min[1] + box.max[1]) / 2 - 15 * IN), name).toBeLessThanOrEqual(TOL)
+      expect(box.max[1] - box.min[1], name).toBeCloseTo(THICK, 4)
+      // depth stays within the side's thickness
+      expect(box.min[0], name).toBeGreaterThanOrEqual(host.min[0] - TOL)
+      expect(box.max[0], name).toBeLessThanOrEqual(host.max[0] + TOL)
+      // the span (local X) runs across the side's width (dims.span fallback)
+      expect(box.max[2] - box.min[2], name).toBeCloseTo(11.25 * IN, 4)
+    }
+  })
+
+  it('seats the fixed shelf IN the dados: 3/8" into each side', () => {
+    const shelf = byName(doc, 'Fixed shelf')
+    // inner span + 2 x 3/8"
+    expect(shelf.dims.length).toBeCloseTo(22.5 * IN + 2 * EIGHTH3, 6)
+    const box = aabb(shelf)
+    for (const name of ['Left side', 'Right side']) {
+      const depth = overlapDepth(box, aabb(byName(doc, name)))
+      expect(Math.abs(depth - EIGHTH3), `shelf vs ${name}`).toBeLessThanOrEqual(TOL)
+    }
+    // and it sits exactly inside the dado channels' vertical extent
+    for (const name of ['Shelf dado left', 'Shelf dado right']) {
+      const dado = aabb(byName(doc, name))
+      expect(box.min[1], name).toBeGreaterThanOrEqual(dado.min[1] - TOL)
+      expect(box.max[1], name).toBeLessThanOrEqual(dado.max[1] + TOL)
+    }
+  })
+
+  it('insets the 1/4" back into the rabbets, reaching both ledges', () => {
+    const back = byName(doc, 'Back panel')
+    expect(back.dims.thickness).toBeCloseTo(0.25 * IN, 6)
+    // ledge to ledge: inner span + 2 x 3/8"
+    expect(back.dims.length).toBeCloseTo(22.5 * IN + 2 * EIGHTH3, 6)
+    const box = aabb(back)
+    for (const name of ['Back rabbet left', 'Back rabbet right']) {
+      const rabbet = aabb(byName(doc, name))
+      // the back's edge lands inside the rabbet's z pocket
+      expect(box.min[2], name).toBeGreaterThanOrEqual(rabbet.min[2] - TOL)
+      expect(box.max[2], name).toBeLessThanOrEqual(rabbet.max[2] + TOL)
+    }
+    // flush with the carcass back plane, ledges at half the side thickness
+    expect(Math.abs(box.max[2] - 5.625 * IN)).toBeLessThanOrEqual(TOL)
+    expect(Math.abs(box.min[0] + 11.625 * IN)).toBeLessThanOrEqual(TOL)
+    expect(Math.abs(box.max[0] - 11.625 * IN)).toBeLessThanOrEqual(TOL)
+  })
+
+  it('mounts two 5-hole shelf-pin rows on the right side above the fixed shelf', () => {
+    const right = byName(doc, 'Right side')
+    const shelfTop = aabb(byName(doc, 'Fixed shelf')).max[1]
+    const rows = doc.parts.filter((p) => p.catalogId === 'shelf-pin-row')
+    expect(rows).toHaveLength(2)
+    for (const row of rows) {
+      expect(row.kind, row.name).toBe('hardware')
+      expect(row.role, row.name).toBe('hardware')
+      expect(row.hostId, row.name).toBe(right.id)
+      expect(row.dims.count, row.name).toBe(5)
+      expect(row.dims.spacing, row.name).toBe(32)
+      const box = aabb(row)
+      // the row runs vertically, wholly above the fixed shelf and below the top
+      expect(box.max[1] - box.min[1], row.name).toBeGreaterThan(4 * 32 - TOL)
+      expect(box.min[1], row.name).toBeGreaterThan(shelfTop)
+      expect(box.max[1], row.name).toBeLessThan(aabb(byName(doc, 'Top')).min[1])
+    }
+  })
+})
+
+describe('wall-cabinet kernel evaluation', () => {
+  beforeAll(async () => {
+    await initKernel()
+  })
+
+  it('evaluates clean: no error, no empty solids, no idle holes', () => {
+    const doc = TEMPLATES.find((t) => t.id === 'wall-cabinet')!.build()
+    const res = evaluateScene(doc)
+    expect(res.error).toBeNull()
+    expect(res.emptySolids).toHaveLength(0)
+    expect(res.idleHoles).toHaveLength(0)
   })
 })

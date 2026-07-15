@@ -3,6 +3,7 @@
 
 import { IN } from './units'
 import { HOLE_COLOR, SOLID_COLORS } from './parts'
+import { hardwareDef } from './hardware'
 import type { Doc, Part } from './types'
 
 export interface Template {
@@ -182,6 +183,148 @@ function buildDoorstop(): Doc {
   }
 }
 
+function buildWallCabinet(): Doc {
+  // A small frameless wall cabinet, all in inches:
+  //   - two sides Standing Up, top and bottom captured between them
+  //     (the bookshelf pattern),
+  //   - a 1/4" ply back inset into 3/8 x 3/8 rabbets along each side's
+  //     back inner edge,
+  //   - one fixed shelf seated in 3/4 x 3/8 dados at mid-height,
+  //   - two System-32 shelf-pin rows on the right side above that shelf.
+  // Nothing is glued: every board stays individual for the cut list.
+  const thick = 0.75 * IN
+  const depth = 11.25 * IN
+  const height = 30 * IN
+  const innerSpan = 22.5 * IN
+  const rabbetW = 0.375 * IN
+  const rabbetD = 0.375 * IN
+  const dadoW = 0.75 * IN
+  const dadoD = 0.375 * IN
+  const backT = 0.25 * IN
+
+  const sideX = (innerSpan + thick) / 2 // side centers: 11 5/8" out
+  const innerX = innerSpan / 2 // inner faces at +/- 11 1/4"
+  const backZ = depth / 2 // the carcass back plane
+  const midY = height / 2
+
+  // Carcass. Sides Standing Up ([0,0,90]): worldSize = [thickness, length, width].
+  const left = board('Left side', height, depth, thick, [-sideX, midY, 0], [0, 0, 90], SOLID_COLORS[0])
+  const right = board('Right side', height, depth, thick, [sideX, midY, 0], [0, 0, 90], SOLID_COLORS[0])
+  const bottom = board('Bottom', innerSpan, depth, thick, [0, thick / 2, 0], [0, 0, 0], SOLID_COLORS[1])
+  const top = board('Top', innerSpan, depth, thick, [0, height - thick / 2, 0], [0, 0, 0], SOLID_COLORS[1])
+
+  // Back rabbets, one per side, hugging the back inner edge. A rabbet's span
+  // runs local X and its depth local Y (local -Y points into the wood), so
+  // [0,0,+90] on the right side sends local X up the board (the hosted span
+  // auto-follows the side's full 30" height) and local -Y into the material;
+  // the left side mirrors with [0,0,-90]. dims.span is just the unhosted
+  // fallback.
+  function backRabbet(name: string, hostId: string, sign: 1 | -1): Part {
+    return {
+      id: crypto.randomUUID(),
+      name,
+      kind: 'rabbet',
+      role: 'hole',
+      variant: 'rabbet',
+      dims: { width: rabbetW, deep: rabbetD, span: height },
+      position: [sign * (innerX + rabbetD / 2), midY, backZ - rabbetW / 2],
+      rotation: [0, 0, sign * 90],
+      color: HOLE_COLOR,
+      hostId,
+    }
+  }
+
+  // Shelf dados at mid-height, one per side. [90,0,+/-90] runs the span
+  // (local X) across the side's width (world Z, host-resolved), keeps the
+  // channel width (local Z) vertical to take the shelf's thickness, and
+  // points local -Y into the side from its inner face.
+  function shelfDado(name: string, hostId: string, sign: 1 | -1): Part {
+    return {
+      id: crypto.randomUUID(),
+      name,
+      kind: 'dado',
+      role: 'hole',
+      variant: 'dado',
+      dims: { width: dadoW, deep: dadoD, span: depth },
+      position: [sign * (innerX + dadoD / 2), midY, 0],
+      rotation: [90, 0, sign * 90],
+      color: HOLE_COLOR,
+      hostId,
+    }
+  }
+
+  // The ply back, On Edge ([90,0,0]): worldSize = [length, width, thickness].
+  // It reaches into both rabbets (ledge to ledge) and runs between the top
+  // and bottom boards.
+  const back = board(
+    'Back panel',
+    innerSpan + 2 * rabbetD,
+    height - 2 * thick,
+    backT,
+    [0, midY, backZ - backT / 2],
+    [90, 0, 0],
+    SOLID_COLORS[2],
+  )
+
+  // The fixed shelf seats in both dados: inner span plus 2 x 3/8" of length.
+  // It is shallower than the carcass by the rabbet width so it clears the
+  // inset back; front edge flush with the carcass front.
+  const shelfDepth = depth - rabbetW
+  const shelf = board(
+    'Fixed shelf',
+    innerSpan + 2 * dadoD,
+    shelfDepth,
+    thick,
+    [0, midY, -rabbetW / 2],
+    [0, 0, 0],
+    SOLID_COLORS[3],
+  )
+
+  // Two shelf-pin rows on the right side's inner face, above the fixed
+  // shelf. [90,0,90] turns the hole row (local Z) vertical and the mounting
+  // face (local -Y) into the side; the origin sits deep/2 into the wood so
+  // the 12mm bores run their full depth from the inner face.
+  const pinCatalog = hardwareDef('shelf-pin-row')!
+  const pinDims = { count: 5, spacing: 32, diameter: 5, deep: 12 }
+  function pinRow(name: string, z: number): Part {
+    return {
+      id: crypto.randomUUID(),
+      name,
+      kind: 'hardware',
+      role: 'hardware',
+      variant: 'shelf-pin-row',
+      catalogId: 'shelf-pin-row',
+      dims: { ...pinDims },
+      position: [innerX + pinDims.deep / 2, 22.5 * IN, z],
+      rotation: [90, 0, 90],
+      color: pinCatalog.color,
+      hostId: right.id,
+    }
+  }
+
+  return {
+    version: 1,
+    name: 'Wall Cabinet',
+    units: 'in',
+    snapStep: IN / 16,
+    parts: [
+      left,
+      right,
+      bottom,
+      top,
+      backRabbet('Back rabbet left', left.id, -1),
+      backRabbet('Back rabbet right', right.id, 1),
+      back,
+      shelfDado('Shelf dado left', left.id, -1),
+      shelfDado('Shelf dado right', right.id, 1),
+      shelf,
+      pinRow('Pin row front', -4.5 * IN),
+      pinRow('Pin row back', 4.5 * IN),
+    ],
+    glues: [],
+  }
+}
+
 export const TEMPLATES: Template[] = [
   {
     id: 'bookshelf',
@@ -200,5 +343,12 @@ export const TEMPLATES: Template[] = [
     name: 'Door Wedge',
     description: 'A single wedge to hold a door open. The simplest possible project.',
     build: buildDoorstop,
+  },
+  {
+    id: 'wall-cabinet',
+    name: 'Wall Cabinet',
+    description:
+      'A small frameless wall cabinet showing off joinery and hardware: a rabbeted-in ply back, a fixed shelf seated in dados, and shelf-pin rows for adjustable shelves.',
+    build: buildWallCabinet,
   },
 ]

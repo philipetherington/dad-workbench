@@ -147,6 +147,18 @@ export function LeftPanel() {
         ))}
       </div>
 
+      <div className="wb-section-title">BUILD FOR ME</div>
+      <div className="wb-shape-grid">
+        <button className="wb-shape-btn" onClick={() => useBus.getState().setBuilder('drawer')}>
+          <ShapeIcon id="drawer" />
+          Drawer…
+        </button>
+        <button className="wb-shape-btn" onClick={() => useBus.getState().setBuilder('door')}>
+          <ShapeIcon id="door" />
+          Door…
+        </button>
+      </div>
+
       <div className="wb-section-title">YOUR PIECES</div>
       <div className="wb-pieces">
         {solids.length === 0 && holes.length === 0 && (

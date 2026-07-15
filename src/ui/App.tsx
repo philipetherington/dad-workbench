@@ -11,6 +11,7 @@ import { LeftPanel } from './LeftPanel'
 import { Inspector } from './Inspector'
 import { ViewStrip, SnapReadout } from './ViewStrip'
 import { MakeItSheet } from './MakeIt'
+import { BuilderSheet } from './BuilderSheet'
 import { ProjectsSheet } from './Projects'
 import { HelpSheet } from './Help'
 import { Coach } from './Coach'
@@ -272,6 +273,7 @@ export function App() {
       <Inspector />
 
       <MakeItSheet open={sheet === 'makeit'} onClose={() => setSheet('none')} />
+      <BuilderSheet />
       <ProjectsSheet open={sheet === 'projects'} onClose={() => setSheet('none')} />
       <HelpSheet
         open={sheet === 'help'}
