@@ -14,6 +14,7 @@ import {
   POSTURES,
   turnAxis,
 } from '../model/rotate'
+import { gapPerAxis, nudgeDelta } from '../model/position'
 import { DimField } from './DimField'
 import { autoAttach } from './attach'
 import {
@@ -29,8 +30,7 @@ import {
 const THICKNESS_PRESETS: { label: string; mm: number }[] = [
   { label: '1/4 ply', mm: 0.25 * IN },
   { label: '1/2 ply', mm: 0.5 * IN },
-  { label: '3/4 ply', mm: 0.75 * IN },
-  { label: '1x (3/4)', mm: 0.75 * IN },
+  { label: '3/4 (ply or 1x)', mm: 0.75 * IN },
   { label: '2x (1-1/2)', mm: 1.5 * IN },
 ]
 
@@ -99,6 +99,22 @@ function MultiPanel() {
 
   const lineUp = (mode: LineUpMode) => store.getState().lineUp(mode, bboxes)
 
+  // With exactly two pieces chosen, say how far apart they sit — shelf
+  // spacing and reveal gaps, read straight off the bboxes already in hand.
+  let gapLines: string[] | null = null
+  if (parts.length === 2 && bboxes[parts[0].id] && bboxes[parts[1].id]) {
+    const gaps = gapPerAxis(bboxes[parts[0].id], bboxes[parts[1].id])
+    const words = ['left-to-right', 'up-and-down', 'front-to-back']
+    const open = [0, 1, 2].filter((i) => gaps[i] > 0.5)
+    if (open.length > 0) {
+      gapLines = open.map((i) => `Space between: ${formatLength(gaps[i], doc.units)} ${words[i]}`)
+    } else if (gaps.every((g) => g < -0.5)) {
+      gapLines = ['These pieces overlap.']
+    } else {
+      gapLines = ['These pieces are touching.']
+    }
+  }
+
   const removeThese = () => {
     const n = parts.length
     store.getState().deleteSelection()
@@ -108,6 +124,14 @@ function MultiPanel() {
   return (
     <div className="wb-right">
       <div className="wb-section-title">{parts.length} PIECES CHOSEN</div>
+
+      {gapLines && (
+        <div className="wb-note">
+          {gapLines.map((line) => (
+            <div key={line}>{line}</div>
+          ))}
+        </div>
+      )}
 
       <div className="wb-group">
         <div className="wb-field-label">Line up…</div>
@@ -164,11 +188,35 @@ function SinglePanel({ part }: { part: Part }) {
 
   const bbox = result?.parts.find((p) => p.id === part.id)?.bbox
   const airborne = bbox ? bbox.min[1] > 0.5 : false
+  const upright =
+    Math.abs(part.rotation[0] % 360) < 0.01 && Math.abs(part.rotation[2] % 360) < 0.01
   const overlapping = (result?.overlaps ?? []).some(([a, b]) => a === part.id || b === part.id)
   const cutAway = (result?.emptySolids ?? []).includes(part.id)
   const idle = (result?.idleHoles ?? []).includes(part.id)
 
   const updateThis = (fn: (p: Part) => void) => store.getState().updateParts([part.id], fn)
+
+  // WHERE IT SITS: offsets are measured against the other solids' combined
+  // bbox, so 'From the left end' reads as distance from the project's edge.
+  const otherSolids = (result?.parts ?? []).filter((p) => p.role === 'solid' && p.id !== part.id)
+  const othersMin = otherSolids.length
+    ? ([0, 1, 2].map((i) => Math.min(...otherSolids.map((p) => p.bbox.min[i]))) as [
+        number,
+        number,
+        number,
+      ])
+    : null
+
+  /** Translate this piece along one world axis (undoable), then re-settle attachments. */
+  const slide = (axis: 0 | 1 | 2, delta: number) => {
+    updateThis((p) => {
+      const pos = [...p.position] as [number, number, number]
+      pos[axis] += delta
+      p.position = pos
+    })
+    // after the engine re-evaluates, settle where this piece now belongs
+    window.setTimeout(() => autoAttach([part.id]), 150)
+  }
 
   /** Rotate this piece AND whatever is attached to it, as one rigid body. */
   const withGroup = (fn: (host: Part, children: Part[]) => void) => {
@@ -348,6 +396,52 @@ function SinglePanel({ part }: { part: Part }) {
         )}
       </div>
 
+      {bbox && (
+        <div className="wb-group">
+          <div className="wb-field-label">WHERE IT SITS</div>
+          <DimField
+            label="Bottom edge above the bench"
+            mm={bbox.min[1]}
+            units={doc.units}
+            step={doc.snapStep}
+            min={0}
+            onCommit={(mm) => slide(1, mm - bbox.min[1])}
+          />
+          {othersMin && (
+            <>
+              <DimField
+                label="From the left end"
+                mm={bbox.min[0] - othersMin[0]}
+                units={doc.units}
+                step={doc.snapStep}
+                min={Number.NEGATIVE_INFINITY}
+                onCommit={(mm) => slide(0, mm - (bbox.min[0] - othersMin[0]))}
+              />
+              <DimField
+                label="From the front"
+                mm={bbox.min[2] - othersMin[2]}
+                units={doc.units}
+                step={doc.snapStep}
+                min={Number.NEGATIVE_INFINITY}
+                onCommit={(mm) => slide(2, mm - (bbox.min[2] - othersMin[2]))}
+              />
+            </>
+          )}
+          {airborne && (
+            <button
+              className="wb-btn small wide"
+              onClick={() =>
+                updateThis(
+                  (p) => (p.position = [p.position[0], p.position[1] - bbox.min[1], p.position[2]]),
+                )
+              }
+            >
+              Drop to Floor
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="wb-group">
         <div className="wb-field-label">TURN</div>
         {isBoardish && (
@@ -387,25 +481,31 @@ function SinglePanel({ part }: { part: Part }) {
             <TiltIcon dir="right" /> Tilt Right
           </button>
         </div>
-        {Math.abs(part.rotation[0] % 360) < 0.01 && Math.abs(part.rotation[2] % 360) < 0.01 && (
-          // Only meaningful while the piece is upright — for a tipped piece,
-          // editing the Y angle directly is NOT a bench spin (the Turn
-          // buttons still work; they compose about the world axis).
-          <div>
-            <div className="wb-field-label">Angle (spin on the bench)</div>
-            <div className="wb-chip-row">
-              {ANGLE_DETENTS.map((a) => (
-                <button
-                  key={a}
-                  className={`wb-chip${Math.abs(((part.rotation[1] % 360) + 360) % 360 - a) < 0.01 ? ' on' : ''}`}
-                  onClick={() => updateThis((p) => (p.rotation = [p.rotation[0], a, p.rotation[2]]))}
-                >
-                  {a}°
-                </button>
-              ))}
-            </div>
+        {/* Only meaningful while the piece is upright — for a tipped piece,
+            editing the Y angle directly is NOT a bench spin (the Turn
+            buttons still work; they compose about the world axis). The
+            chips disable rather than vanish: nothing hides. */}
+        <div>
+          <div className="wb-field-label">Angle (spin on the bench)</div>
+          <div className="wb-chip-row">
+            {ANGLE_DETENTS.map((a) => (
+              <button
+                key={a}
+                className={`wb-chip${Math.abs(((part.rotation[1] % 360) + 360) % 360 - a) < 0.01 ? ' on' : ''}`}
+                disabled={!upright}
+                style={upright ? undefined : { opacity: 0.45, pointerEvents: 'none' }}
+                onClick={() => updateThis((p) => (p.rotation = [p.rotation[0], a, p.rotation[2]]))}
+              >
+                {a}°
+              </button>
+            ))}
           </div>
-        )}
+          {!upright && (
+            <div className="wb-hint">
+              Stand the piece upright to spin it on the bench — the Turn buttons above still work.
+            </div>
+          )}
+        </div>
         <button className="wb-btn small" onClick={() => updateThis(applyFlip)}>
           <FlipIcon /> Flip (mirror)
         </button>
@@ -433,19 +533,6 @@ function SinglePanel({ part }: { part: Part }) {
             <ArrowIcon dir="down" /> Down
           </button>
         </div>
-        {airborne && bbox && (
-          <>
-            <div className="wb-hint">
-              {formatLength(bbox.min[1], doc.units)} above the bench
-            </div>
-            <button
-              className="wb-btn small wide"
-              onClick={() => updateThis((p) => (p.position = [p.position[0], p.position[1] - bbox.min[1], p.position[2]]))}
-            >
-              Drop to Floor
-            </button>
-          </>
-        )}
       </div>
 
       <div className="wb-group">
@@ -473,13 +560,17 @@ function nudge(part: Part, dx: number, dy: number, dz: number) {
     return
   }
   const step = s.doc.snapStep
+  // arrows are screen-relative: 'Left' moves the piece left on screen no
+  // matter where the camera stands; Up/Down stay world-vertical
+  const yaw = useBus.getState().camera?.yawDeg() ?? 0
+  const [wx, wz] = nudgeDelta(dx, dz, yaw)
   s.updateParts([part.id], (p) => {
     // a piece can never sink through the bench: its bbox bottom stays >= 0
     const floorY = worldSize(p)[1] / 2
     p.position = [
-      p.position[0] + dx * step,
+      p.position[0] + wx * step,
       Math.max(p.position[1] + dy * step, floorY),
-      p.position[2] + dz * step,
+      p.position[2] + wz * step,
     ]
   })
   // after the engine re-evaluates, settle where this piece now belongs

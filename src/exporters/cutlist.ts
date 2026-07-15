@@ -2,6 +2,7 @@
 // list, grouped by matching stock dimensions.
 
 import type { Doc, Part } from '../model/types'
+import { buildHardwareList } from '../model/hardware'
 import { formatLength, formatLengthBare } from '../model/units'
 
 export interface CutItem {
@@ -168,6 +169,25 @@ ${otherRows}
     </tbody>
   </table>`
 
+  // the hardware to buy, right on the same sheet he takes to the store
+  const hardware = buildHardwareList(doc.parts)
+  const hardwareRows = hardware
+    .map((h) => `      <tr><td class="num">${h.qty}</td><td>${escapeHTML(h.line)}</td></tr>`)
+    .join('\n')
+  const hardwareSection =
+    hardware.length === 0
+      ? ''
+      : `
+  <h2>Hardware to buy</h2>
+  <table>
+    <thead>
+      <tr><th>Qty</th><th>Item</th></tr>
+    </thead>
+    <tbody>
+${hardwareRows}
+    </tbody>
+  </table>`
+
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -212,7 +232,7 @@ ${otherRows}
     <tbody>
 ${boardRows}
     </tbody>
-  </table>${otherSection}
+  </table>${otherSection}${hardwareSection}
   <p class="footnote">Lengths are finished sizes — allow extra for saw kerf and trimming.</p>
 </body>
 </html>

@@ -3,6 +3,7 @@
 import type { Part } from '../model/types'
 import { dimSpecsFor } from '../model/types'
 import { formatLengthBare } from '../model/units'
+import type { ToolbarItem } from '../model/parts'
 import { SOLID_ITEMS, HOLE_ITEMS, HARDWARE_ITEMS } from '../model/parts'
 import { useStore } from '../model/store'
 import { useBus } from '../viewport/bus'
@@ -71,6 +72,17 @@ export function LeftPanel() {
   const setShowCutouts = useBus((s) => s.setShowCutouts)
   const result = useBus((s) => s.result)
 
+  // New pieces spawn rightward of existing ones and can land out of view —
+  // reframe shortly after adding so "Board" visibly produces a board. Skip
+  // small scenes: a first board is already framed, and reframing every add
+  // would be constant camera motion.
+  const addAndFrame = (item: ToolbarItem) => {
+    addPart(item)
+    if (useStore.getState().doc.parts.length > 3) {
+      setTimeout(() => useBus.getState().camera?.showEverything(), 350)
+    }
+  }
+
   const solids = doc.parts.filter((p) => p.role !== 'hole')
   const holes = doc.parts.filter((p) => p.role === 'hole')
   const idleHoles = new Set(result?.idleHoles ?? [])
@@ -80,7 +92,7 @@ export function LeftPanel() {
       <div className="wb-section-title">ADD A PIECE</div>
       <div className="wb-shape-grid">
         {SOLID_ITEMS.map((item) => (
-          <button key={item.id} className="wb-shape-btn" onClick={() => addPart(item)}>
+          <button key={item.id} className="wb-shape-btn" onClick={() => addAndFrame(item)}>
             <ShapeIcon id={item.id} />
             {item.label}
           </button>
@@ -96,7 +108,7 @@ export function LeftPanel() {
             onClick={() => {
               // a brand-new hole must never arrive invisible
               if (!showCutouts) setShowCutouts(true)
-              addPart(item)
+              addAndFrame(item)
             }}
           >
             <ShapeIcon id={item.id} />
@@ -108,7 +120,7 @@ export function LeftPanel() {
       <div className="wb-section-title">HARDWARE</div>
       <div className="wb-shape-grid">
         {HARDWARE_ITEMS.map((item) => (
-          <button key={item.id} className="wb-shape-btn" onClick={() => addPart(item)}>
+          <button key={item.id} className="wb-shape-btn" onClick={() => addAndFrame(item)}>
             <ShapeIcon id={item.id} />
             {item.label}
           </button>

@@ -47,9 +47,8 @@ export function ViewStrip() {
             setActive(null)
             camera.spin(15)
           }}
-          title="Spin left"
         >
-          <SpinIcon dir="ccw" />
+          <SpinIcon dir="ccw" /> Look Left
         </button>
         <button
           className="wb-view-btn"
@@ -57,9 +56,8 @@ export function ViewStrip() {
             setActive(null)
             camera.spin(-15)
           }}
-          title="Spin right"
         >
-          <SpinIcon dir="cw" />
+          Look Right <SpinIcon dir="cw" />
         </button>
         <button className="wb-view-btn" onClick={() => camera.zoom(0.8)}>
           Zoom In
@@ -90,7 +88,9 @@ export function SnapReadout() {
   const current = options.find((o) => Math.abs(o.mm - doc.snapStep) < 0.001)
 
   return (
-    <div className="wb-snap-readout" onClick={() => setOpen(!open)}>
+    // fixed min-width so toggling the chips open/closed doesn't shove the
+    // view buttons sideways
+    <div className="wb-snap-readout" style={{ minWidth: 300 }} onClick={() => setOpen(!open)}>
       {open ? (
         <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
           Snap to:

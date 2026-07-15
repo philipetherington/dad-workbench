@@ -205,8 +205,8 @@ export function MakeItSheet({ open, onClose }: { open: boolean; onClose: () => v
         <div className="rows">
           <button className="wb-sheet-row" onClick={doCutList} disabled={!ready}>
             <span>
-              Cut List — the boards you&rsquo;ll need
-              <span className="sub">Opens a printable page</span>
+              Cut List — the boards and hardware you&rsquo;ll need
+              <span className="sub">Opens a printable page to take to the store</span>
             </span>
           </button>
 

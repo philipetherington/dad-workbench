@@ -17,6 +17,11 @@
   --hole-stripe: repeating-linear-gradient(45deg, #f3b9b9 0 8px, #e07f7f 8px 14px);
   --radius: 12px;
   --shadow: 0 2px 10px rgba(60, 40, 20, 0.12);
+  /* Type scale — 18px is the contract floor for body/label text. */
+  --type-title: 26px;
+  --type-numeric: 22px;
+  --type-body: 18px;
+  --type-label: 18px;
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
   font-size: 18px;
   color: var(--ink);
@@ -64,11 +69,20 @@ button { font: inherit; color: inherit; }
 
 .wb-left, .wb-right {
   background: var(--panel);
-  overflow-y: auto;
+  /* Always-on scrollbar: macOS overlay scrollbars would leave content below
+     the fold undiscoverable. */
+  overflow-y: scroll;
   padding: 14px;
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+.wb-left::-webkit-scrollbar, .wb-right::-webkit-scrollbar { width: 14px; }
+.wb-left::-webkit-scrollbar-track, .wb-right::-webkit-scrollbar-track { background: transparent; }
+.wb-left::-webkit-scrollbar-thumb, .wb-right::-webkit-scrollbar-thumb {
+  background: var(--panel-edge);
+  border-radius: 7px;
+  border: 3px solid var(--panel);
 }
 .wb-left { border-right: 2px solid var(--panel-edge); }
 .wb-right { border-left: 2px solid var(--panel-edge); }
@@ -105,7 +119,7 @@ button { font: inherit; color: inherit; }
 }
 
 .wb-saved {
-  font-size: 16px;
+  font-size: var(--type-body);
   color: var(--green);
   white-space: nowrap;
 }
@@ -143,13 +157,14 @@ button { font: inherit; color: inherit; }
   color: var(--red);
   background: #fff;
 }
-.wb-btn.small { min-height: 48px; padding: 4px 12px; font-size: 16px; }
+.wb-btn.small { min-height: 48px; padding: 4px 12px; font-size: var(--type-body); }
 .wb-btn.wide { width: 100%; }
 
 /* ---------- left panel ---------- */
 
 .wb-section-title {
-  font-size: 15px;
+  /* Letter-spaced caps header — works below the body floor; 16px minimum. */
+  font-size: 16px;
   font-weight: 750;
   letter-spacing: 0.08em;
   color: var(--ink-soft);
@@ -179,7 +194,7 @@ button { font: inherit; color: inherit; }
   border-radius: var(--radius);
   background: #fff;
   cursor: pointer;
-  font-size: 16px;
+  font-size: var(--type-body);
   font-weight: 600;
 }
 .wb-shape-btn:hover { border-color: var(--accent); background: var(--accent-soft); }
@@ -207,9 +222,10 @@ button { font: inherit; color: inherit; }
   flex: none;
 }
 .wb-piece-row .swatch.hole { background: var(--hole-stripe); }
-.wb-piece-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; font-size: 16px; }
-.wb-piece-row .dims { font-size: 13.5px; color: var(--ink-soft); white-space: nowrap; }
-.wb-piece-row input[type='checkbox'] { width: 22px; height: 22px; accent-color: var(--accent); flex: none; }
+.wb-piece-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; font-size: var(--type-body); }
+/* Dims may wrap to two lines — never truncate a measurement. */
+.wb-piece-row .dims { font-size: var(--type-body); color: var(--ink-soft); }
+.wb-piece-row input[type='checkbox'] { width: 28px; height: 28px; accent-color: var(--accent); flex: none; }
 .wb-piece-row .pin {
   border: none;
   background: none;
@@ -217,8 +233,8 @@ button { font: inherit; color: inherit; }
   cursor: pointer;
   opacity: 0.55;
   padding: 12px;
-  min-width: 44px;
-  min-height: 44px;
+  min-width: 48px;
+  min-height: 48px;
 }
 .wb-piece-row .pin.on { opacity: 1; color: var(--accent); }
 
@@ -232,7 +248,7 @@ button { font: inherit; color: inherit; }
 /* ---------- right panel (inspector) ---------- */
 
 .wb-field-label {
-  font-size: 15px;
+  font-size: var(--type-label);
   font-weight: 700;
   color: var(--ink-soft);
   margin-bottom: 4px;
@@ -242,7 +258,7 @@ button { font: inherit; color: inherit; }
 .wb-dim-input {
   flex: 1;
   min-width: 0;
-  font-size: 22px;
+  font-size: var(--type-numeric);
   font-weight: 600;
   padding: 8px 10px;
   border: 2px solid var(--panel-edge);
@@ -260,7 +276,7 @@ button { font: inherit; color: inherit; }
 .wb-stepper {
   width: 44px;
   height: 48px;
-  font-size: 22px;
+  font-size: var(--type-numeric);
   font-weight: 700;
   border: 2px solid var(--panel-edge);
   border-radius: 10px;
@@ -269,15 +285,15 @@ button { font: inherit; color: inherit; }
   flex: none;
 }
 .wb-stepper:hover { border-color: var(--accent); }
-.wb-hint { font-size: 14.5px; color: var(--ink-soft); margin-top: 3px; min-height: 18px; }
+.wb-hint { font-size: var(--type-body); color: var(--ink-soft); margin-top: 3px; min-height: 18px; }
 .wb-hint.bad { color: var(--red); font-weight: 600; }
 
 .wb-chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .wb-chip {
-  font-size: 15px;
+  font-size: var(--type-body);
   font-weight: 600;
-  min-height: 42px;
-  padding: 8px 13px;
+  min-height: 48px;
+  padding: 10px 16px;
   border-radius: 999px;
   border: 1.5px solid var(--panel-edge);
   background: #fff;
@@ -289,17 +305,18 @@ button { font: inherit; color: inherit; }
 /* solid / hole two-card switch */
 .wb-role-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .wb-role-card {
-  padding: 10px 8px;
+  padding: 12px 10px;
   border: 2.5px solid var(--panel-edge);
   border-radius: var(--radius);
   background: #fff;
   cursor: pointer;
   text-align: center;
-  font-size: 15.5px;
+  font-size: var(--type-body);
   font-weight: 650;
   line-height: 1.25;
 }
-.wb-role-card .sub { display: block; font-size: 13px; font-weight: 500; color: var(--ink-soft); }
+/* Sub-line: 16px minimum — 18px crowds the 264px-wide card pair. */
+.wb-role-card .sub { display: block; font-size: 16px; font-weight: 500; color: var(--ink-soft); }
 .wb-role-card.on.solid { border-color: #a9793f; background: #f7ecd9; }
 .wb-role-card.on.hole { border-color: var(--red); background: var(--red-soft); }
 
@@ -313,17 +330,18 @@ button { font: inherit; color: inherit; }
 .wb-btn-grid .wb-btn {
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
   white-space: normal;
   overflow-wrap: anywhere;
   line-height: 1.15;
   text-align: center;
-  font-size: 15px;
+  font-size: var(--type-body);
   padding: 8px 6px;
   min-height: 62px;
 }
 
 .wb-note {
-  font-size: 15.5px;
+  font-size: var(--type-body);
   line-height: 1.4;
   padding: 10px 12px;
   border-radius: 10px;
@@ -345,7 +363,7 @@ button { font: inherit; color: inherit; }
 .wb-view-btn {
   min-height: 48px;
   padding: 6px 13px;
-  font-size: 16px;
+  font-size: var(--type-body);
   font-weight: 600;
   border: 2px solid var(--panel-edge);
   border-radius: 10px;
@@ -356,7 +374,7 @@ button { font: inherit; color: inherit; }
 .wb-view-btn.on { border-color: var(--accent); background: var(--accent-soft); }
 
 .wb-snap-readout {
-  font-size: 15.5px;
+  font-size: var(--type-body);
   font-weight: 600;
   padding: 10px 14px;
   min-height: 48px;
@@ -418,7 +436,7 @@ button { font: inherit; color: inherit; }
   transform: translate(-50%, -120%);
   background: rgba(43, 35, 24, 0.88);
   color: #fff;
-  font-size: 15.5px;
+  font-size: var(--type-body);
   font-weight: 650;
   padding: 4px 10px;
   border-radius: 8px;
@@ -459,7 +477,7 @@ button { font: inherit; color: inherit; }
   gap: 14px;
   background: var(--ink);
   color: #fff;
-  font-size: 17px;
+  font-size: var(--type-body);
   padding: 14px 18px;
   border-radius: 12px;
   box-shadow: var(--shadow);
@@ -468,7 +486,7 @@ button { font: inherit; color: inherit; }
   border: none;
   background: var(--accent);
   color: #fff;
-  font-size: 16px;
+  font-size: var(--type-body);
   font-weight: 700;
   padding: 10px 16px;
   border-radius: 9px;
@@ -498,7 +516,7 @@ button { font: inherit; color: inherit; }
   flex-direction: column;
   gap: 16px;
 }
-.wb-sheet h2 { margin: 0; font-size: 26px; }
+.wb-sheet h2 { margin: 0; font-size: var(--type-title); }
 .wb-sheet-close {
   position: sticky;
   top: 0;
@@ -507,7 +525,7 @@ button { font: inherit; color: inherit; }
   border: 2px solid var(--panel-edge);
   border-radius: 10px;
   background: #fff;
-  font-size: 17px;
+  font-size: var(--type-body);
   font-weight: 650;
   cursor: pointer;
   color: var(--ink);
@@ -533,7 +551,7 @@ button { font: inherit; color: inherit; }
   width: 100%;
 }
 .wb-sheet-row:hover { border-color: var(--accent); }
-.wb-sheet-row .sub { display: block; font-size: 15px; font-weight: 450; color: var(--ink-soft); }
+.wb-sheet-row .sub { display: block; font-size: 16px; font-weight: 450; color: var(--ink-soft); }
 
 .wb-recent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
 .wb-recent-card {
@@ -549,8 +567,8 @@ button { font: inherit; color: inherit; }
   text-align: left;
 }
 .wb-recent-card:hover { border-color: var(--accent); }
-.wb-recent-card .title { font-weight: 700; font-size: 17px; }
-.wb-recent-card .date { font-size: 14px; color: var(--ink-soft); }
+.wb-recent-card .title { font-weight: 700; font-size: var(--type-body); }
+.wb-recent-card .date { font-size: 16px; color: var(--ink-soft); }
 
 /* Make It preview */
 .wb-makeit-preview {
@@ -563,7 +581,7 @@ button { font: inherit; color: inherit; }
   position: relative;
 }
 .wb-makeit-preview canvas { width: 100%; height: 100%; display: block; }
-.wb-makeit-caption { text-align: center; font-size: 15.5px; color: var(--ink-soft); margin-top: 4px; }
+.wb-makeit-caption { text-align: center; font-size: var(--type-body); color: var(--ink-soft); margin-top: 4px; }
 
 /* ---------- coach marks ---------- */
 
@@ -619,7 +637,7 @@ button { font: inherit; color: inherit; }
   display: flex;
   flex-direction: column;
   gap: 10px;
-  font-size: 17px;
+  font-size: var(--type-body);
 }
 
 /* ---------- splash ---------- */
