@@ -19,6 +19,10 @@ const WOOD_EDGE = '#6b5d4a'
 const HOLE_EDGE = '#c0392b'
 const STRIPE_LIGHT = '#f3b9b9'
 const STRIPE_DARK = '#e07f7f'
+const METAL = '#9ba3ad'
+const METAL_DARK = '#8d949c'
+const METAL_LIGHT = '#c7cdd4'
+const METAL_EDGE = '#4d565f'
 
 const solidProps = {
   stroke: WOOD_EDGE,
@@ -34,6 +38,25 @@ const holeProps = {
   strokeLinecap: 'round' as const,
 }
 
+const metalProps = {
+  stroke: METAL_EDGE,
+  strokeWidth: 2,
+  strokeLinejoin: 'round' as const,
+  strokeLinecap: 'round' as const,
+}
+
+// Ids whose picture uses the diagonal red stripe pattern (things that CUT).
+const STRIPED_IDS = new Set([
+  'round-hole',
+  'square-hole',
+  'slot',
+  'dado',
+  'groove',
+  'rabbet',
+  'tenon',
+  'edge-profile',
+])
+
 // ---------- ShapeIcon ----------
 
 export function ShapeIcon({ id, size = 44 }: { id: string; size?: number }): React.ReactElement {
@@ -42,7 +65,7 @@ export function ShapeIcon({ id, size = 44 }: { id: string; size?: number }): Rea
   const uid = React.useId()
   const patternId = `wb-stripe-${uid.replace(/[^a-zA-Z0-9_-]/g, '')}`
   const stripes = `url(#${patternId})`
-  const isHole = id === 'round-hole' || id === 'square-hole' || id === 'slot'
+  const isHole = STRIPED_IDS.has(id)
 
   let picture: React.ReactElement
 
@@ -146,6 +169,224 @@ export function ShapeIcon({ id, size = 44 }: { id: string; size?: number }): Rea
         <g {...holeProps}>
           <path d="M 5 22 V 27 A 7 7 0 0 0 12 34 H 36 A 7 7 0 0 0 43 27 V 22" fill={STRIPE_DARK} />
           <rect x="5" y="14" width="38" height="14" rx="7" fill={stripes} />
+        </g>
+      )
+      break
+
+    // ----- joinery cutters (red-striped: they remove wood) -----
+
+    case 'dado':
+      // Board cross-section with a square channel cut across the top.
+      picture = (
+        <g>
+          <path
+            d="M 4 16 H 17 V 26 H 31 V 16 H 44 V 36 H 4 Z"
+            fill={WOOD}
+            {...solidProps}
+          />
+          <rect x="17" y="16" width="14" height="10" fill={stripes} {...holeProps} />
+        </g>
+      )
+      break
+
+    case 'groove':
+      // Plank seen from a corner with a striped channel running lengthwise.
+      picture = (
+        <g>
+          <polygon points="4,26 32,15 44,20 16,31" fill={WOOD} {...solidProps} />
+          <polygon points="16,31 44,20 44,26 16,37" fill={WOOD_DARK} {...solidProps} />
+          <polygon points="4,26 16,31 16,37 4,32" fill={WOOD_DARK} {...solidProps} />
+          <polygon points="8.2,27.7 36.2,16.7 40.4,18.5 12.4,29.5" fill={stripes} {...holeProps} />
+        </g>
+      )
+      break
+
+    case 'rabbet':
+      // Board cross-section with a step removed from its top edge.
+      picture = (
+        <g>
+          <path d="M 6 14 H 29 V 23 H 42 V 36 H 6 Z" fill={WOOD} {...solidProps} />
+          <rect x="29" y="14" width="13" height="9" fill={stripes} {...holeProps} />
+        </g>
+      )
+      break
+
+    case 'tenon':
+      // Board end, side view: wood tongue protrudes, removed shoulders striped.
+      picture = (
+        <g>
+          <rect x="4" y="12" width="24" height="24" fill={WOOD} {...solidProps} />
+          <rect x="28" y="19" width="15" height="10" fill={WOOD} {...solidProps} />
+          <rect x="28" y="12" width="15" height="7" fill={stripes} {...holeProps} />
+          <rect x="28" y="29" width="15" height="7" fill={stripes} {...holeProps} />
+        </g>
+      )
+      break
+
+    case 'edge-profile':
+      // Board corner with a quarter round cut away (striped quarter-circle).
+      picture = (
+        <g>
+          <path d="M 8 14 H 29 A 11 11 0 0 0 40 25 V 38 H 8 Z" fill={WOOD} {...solidProps} />
+          <path d="M 29 14 H 40 V 25 A 11 11 0 0 1 29 14 Z" fill={stripes} {...holeProps} />
+        </g>
+      )
+      break
+
+    // ----- hardware (metal grays, never striped) -----
+
+    case 'shelf-pin-row':
+      // Cabinet side with a vertical row of four pin holes.
+      picture = (
+        <g>
+          <rect x="15" y="5" width="18" height="38" fill={WOOD} {...solidProps} />
+          <g {...metalProps}>
+            <circle cx="24" cy="11.5" r="3" fill={METAL_DARK} />
+            <circle cx="24" cy="19.8" r="3" fill={METAL_DARK} />
+            <circle cx="24" cy="28.1" r="3" fill={METAL_DARK} />
+            <circle cx="24" cy="36.4" r="3" fill={METAL_DARK} />
+          </g>
+        </g>
+      )
+      break
+
+    case 'cup-hinge':
+      // Euro hinge: big cup bore on the left, mounting plate wing with screws.
+      picture = (
+        <g {...metalProps}>
+          <rect x="24" y="17" width="20" height="14" rx="3" fill={METAL} />
+          <circle cx="17" cy="24" r="12" fill={METAL} />
+          <circle cx="17" cy="24" r="7.5" fill={METAL_DARK} />
+          <circle cx="31.5" cy="24" r="2.2" fill={METAL_DARK} />
+          <circle cx="39" cy="24" r="2.2" fill={METAL_DARK} />
+        </g>
+      )
+      break
+
+    case 'wood-screw':
+      // Side view: countersunk slotted head, tapered threaded shank.
+      picture = (
+        <g {...metalProps}>
+          <path d="M 13 6 H 35 L 29.5 14 H 18.5 Z" fill={METAL} />
+          <path d="M 24 6 V 10.5" strokeWidth={2.4} />
+          <path d="M 18.5 14 L 24 43 L 29.5 14 Z" fill={METAL_DARK} />
+          <path d="M 19.5 19.5 L 28 17" strokeWidth={1.6} />
+          <path d="M 20.6 25.5 L 27.2 23" strokeWidth={1.6} />
+          <path d="M 21.7 31.5 L 26.4 29" strokeWidth={1.6} />
+          <path d="M 22.7 37 L 25.5 35" strokeWidth={1.6} />
+        </g>
+      )
+      break
+
+    case 'butt-hinge':
+      // Two leaves with screw holes flanking a knuckled barrel.
+      picture = (
+        <g {...metalProps}>
+          <rect x="5" y="12" width="15" height="24" fill={METAL} />
+          <rect x="28" y="12" width="15" height="24" fill={METAL} />
+          <rect x="20" y="9" width="8" height="30" rx="4" fill={METAL_DARK} />
+          <path d="M 20 19 H 28 M 20 29 H 28" strokeWidth={1.6} />
+          <circle cx="12.5" cy="18" r="2" fill={METAL_DARK} />
+          <circle cx="12.5" cy="30" r="2" fill={METAL_DARK} />
+          <circle cx="35.5" cy="18" r="2" fill={METAL_DARK} />
+          <circle cx="35.5" cy="30" r="2" fill={METAL_DARK} />
+        </g>
+      )
+      break
+
+    case 'drawer-slide':
+      // Long thin rail with a row of ball bearings showing in the channel.
+      picture = (
+        <g {...metalProps}>
+          <rect x="3" y="18" width="42" height="12" rx="2.5" fill={METAL} />
+          <rect x="6" y="21.5" width="36" height="5" rx="2.5" fill={METAL_DARK} stroke="none" />
+          <g fill={METAL_LIGHT} stroke="none">
+            <circle cx="11" cy="24" r="2" />
+            <circle cx="17.5" cy="24" r="2" />
+            <circle cx="24" cy="24" r="2" />
+            <circle cx="30.5" cy="24" r="2" />
+            <circle cx="37" cy="24" r="2" />
+          </g>
+        </g>
+      )
+      break
+
+    case 'pocket-screw':
+      // Board section with the characteristic angled pocket and screw.
+      picture = (
+        <g>
+          <rect x="4" y="20" width="40" height="20" fill={WOOD} {...solidProps} />
+          <path d="M 12 20 H 25 L 38 33 L 31 39 Z" fill={WOOD_DARK} {...solidProps} />
+          <g {...metalProps}>
+            <path d="M 15 15 L 33 32" stroke={METAL} strokeWidth={5} />
+            <path d="M 33 32 L 36.5 35.3" stroke={METAL_DARK} strokeWidth={3} />
+            <circle cx="14" cy="14" r="3.6" fill={METAL_DARK} />
+          </g>
+        </g>
+      )
+      break
+
+    case 'dowel-pin':
+      // Short fluted dowel lying on its side.
+      picture = (
+        <g {...metalProps}>
+          <path d="M 13 16 H 34 A 5 8 0 0 1 34 32 H 13 A 5 8 0 0 1 13 16 Z" fill={METAL} />
+          <ellipse cx="34" cy="24" rx="5" ry="8" fill={METAL_DARK} />
+          <path d="M 15 20 H 31.5 M 15 24 H 31 M 15 28 H 31.5" strokeWidth={1.6} />
+        </g>
+      )
+      break
+
+    case 'knob':
+      // Round knob on a base plate, front view.
+      picture = (
+        <g {...metalProps}>
+          <circle cx="24" cy="24" r="16" fill={METAL_DARK} />
+          <circle cx="24" cy="24" r="9.5" fill={METAL} />
+          <ellipse
+            cx="20"
+            cy="20"
+            rx="3.4"
+            ry="2.2"
+            fill={METAL_LIGHT}
+            stroke="none"
+            transform="rotate(-35 20 20)"
+          />
+        </g>
+      )
+      break
+
+    case 'pull':
+      // Bar pull: horizontal bar standing on two posts, front view.
+      picture = (
+        <g {...metalProps}>
+          <rect x="11" y="22" width="5" height="13" fill={METAL_DARK} />
+          <rect x="32" y="22" width="5" height="13" fill={METAL_DARK} />
+          <rect x="5" y="13" width="38" height="9" rx="4.5" fill={METAL} />
+        </g>
+      )
+      break
+
+    // ----- builders (wood, slightly diagrammatic) -----
+
+    case 'drawer':
+      // Open drawer box seen at an angle: front, side, dark open top.
+      picture = (
+        <g {...solidProps}>
+          <polygon points="6,20 18,13 42,13 30,20" fill="#7d6146" />
+          <polygon points="30,20 42,13 42,32 30,39" fill={WOOD_DARK} />
+          <rect x="6" y="20" width="24" height="19" fill={WOOD} />
+          <circle cx="18" cy="29.5" r="2.4" fill={WOOD_DARK} />
+        </g>
+      )
+      break
+
+    case 'door':
+      // Rail-and-stile frame around a recessed panel.
+      picture = (
+        <g {...solidProps}>
+          <rect x="10" y="5" width="28" height="38" fill={WOOD} />
+          <rect x="16.5" y="11.5" width="15" height="25" fill="#dcb87f" />
         </g>
       )
       break

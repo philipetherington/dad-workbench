@@ -10,6 +10,7 @@
 // rotate(X) rotate(Y) rotate(Z) <primitive>.
 
 import type { Doc, Part } from '../model/types'
+import { edgeProfileIndex, effectiveSpan, hostOf, tenonBodySize } from '../model/types'
 import { hardwareDef } from '../model/hardware'
 import { formatLength } from '../model/units'
 
@@ -74,10 +75,83 @@ function primitive(doc: Doc, part: Part): string[] {
         `}`,
       ]
     }
+    case 'dado':
+    case 'groove':
+    case 'rabbet': {
+      // hosted cutters resolve their span from the host exactly like the
+      // engine does (effectiveSpan); unhosted ones use dims.span
+      const span = effectiveSpan(doc, part)
+      return [
+        `cube([${num(span)}, ${num(d.deep)}, ${num(d.width)}], center = true);` +
+          dimComment(doc, [span, d.deep, d.width]),
+      ]
+    }
+    case 'tenon': {
+      // removed material: body box minus the tongue (tongue runs 1mm long so
+      // the difference has no coplanar end faces)
+      const [bodyT, bodyW] = tenonBodySize(part, hostOf(doc, part))
+      return [
+        `difference() {` + dimComment(doc, [d.length, d.tongueThickness, d.tongueWidth]),
+        `  cube([${num(d.length)}, ${num(bodyT)}, ${num(bodyW)}], center = true);`,
+        `  cube([${num(d.length + 1)}, ${num(d.tongueThickness)}, ${num(d.tongueWidth)}], center = true);`,
+        `}`,
+      ]
+    }
+    case 'edge-profile': {
+      // same construction as the engine: profile drawn with 2D x -> local Z
+      // and 2D y -> local Y, extruded along +Z, then rotate([0,-90,0]) so the
+      // prism runs along X; quarter circles become 24-segment polygon arcs
+      const span = effectiveSpan(doc, part)
+      const pts = edgeProfilePolygon(d.size, edgeProfileIndex(d.profile))
+      return [
+        `rotate([0, -90, 0]) linear_extrude(height = ${num(span)}, center = true)` +
+          dimComment(doc, [d.size, d.size, span]),
+        `  polygon(points = [${pts.map(([x, y]) => `[${num(x)}, ${num(y)}]`).join(', ')}]);`,
+      ]
+    }
     case 'hardware':
       // hardware bodies never export (they're bought, not made) — their
       // BORES are emitted separately, see hardwareCutterModule
       return []
+  }
+}
+
+/**
+ * 2D outline of the material an edge profile removes, in the plane described
+ * above (x -> local Z, y -> local Y); the profiled corner is at (+size/2,
+ * +size/2). CCW winding, quarter arcs approximated with 24 segments.
+ */
+function edgeProfilePolygon(size: number, which: 0 | 1 | 2): [number, number][] {
+  const h = size / 2
+  const arc = (cx: number, cy: number, fromDeg: number, toDeg: number): [number, number][] => {
+    const SEG = 24
+    const pts: [number, number][] = []
+    for (let i = 0; i <= SEG; i++) {
+      const a = ((fromDeg + ((toDeg - fromDeg) * i) / SEG) * Math.PI) / 180
+      pts.push([cx + size * Math.cos(a), cy + size * Math.sin(a)])
+    }
+    return pts
+  }
+  switch (which) {
+    case 1:
+      // chamfer: the 45° corner triangle
+      return [
+        [-h, h],
+        [h, -h],
+        [h, h],
+      ]
+    case 2:
+      // cove: the quarter disc centered on the profiled corner
+      return [[h, h], ...arc(h, h, 180, 270)]
+    default:
+      // roundover: corner square minus the quarter disc about the inner
+      // corner (arc endpoints coincide with square corners — sliced off)
+      return [
+        [h, -h],
+        [h, h],
+        [-h, h],
+        ...arc(-h, -h, 90, 0).slice(1, -1),
+      ]
   }
 }
 

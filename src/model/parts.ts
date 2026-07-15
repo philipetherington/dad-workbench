@@ -116,6 +116,66 @@ export const HOLE_ITEMS: ToolbarItem[] = [
   },
 ]
 
+/**
+ * Joinery cutters — the cabinetmaker's family of cuts. All role 'hole'.
+ * Drop one on a board and it attaches; dado/groove/rabbet/edge trims then
+ * run the FULL board automatically (span is just the unhosted fallback).
+ */
+export const JOINERY_ITEMS: ToolbarItem[] = [
+  {
+    id: 'dado',
+    label: 'Dado',
+    kind: 'dado',
+    role: 'hole',
+    dims: (u) =>
+      u === 'in'
+        ? { width: 0.75 * IN, deep: 0.375 * IN, span: 12 * IN }
+        : { width: 18, deep: 9, span: 300 },
+  },
+  {
+    id: 'groove',
+    label: 'Groove',
+    kind: 'groove',
+    role: 'hole',
+    // a groove runs ALONG the board: spawn turned 90° so its span lies along Z
+    rotation: [0, 90, 0],
+    dims: (u) =>
+      u === 'in'
+        ? { width: 0.25 * IN, deep: 0.375 * IN, span: 12 * IN }
+        : { width: 6, deep: 9, span: 300 },
+  },
+  {
+    id: 'rabbet',
+    label: 'Rabbet',
+    kind: 'rabbet',
+    role: 'hole',
+    dims: (u) =>
+      u === 'in'
+        ? { width: 0.5 * IN, deep: 0.375 * IN, span: 12 * IN }
+        : { width: 12, deep: 9, span: 300 },
+  },
+  {
+    id: 'tenon',
+    label: 'Tenon',
+    kind: 'tenon',
+    role: 'hole',
+    dims: (u) =>
+      u === 'in'
+        ? { length: 1.5 * IN, tongueThickness: 0.375 * IN, tongueWidth: 2 * IN }
+        : { length: 40, tongueThickness: 9, tongueWidth: 50 },
+  },
+  {
+    id: 'edge-profile',
+    label: 'Rounded Edge',
+    kind: 'edge-profile',
+    role: 'hole',
+    dims: (u) =>
+      u === 'in'
+        ? { size: 0.375 * IN, span: 12 * IN, profile: 0 }
+        : { size: 9, span: 300, profile: 0 },
+  },
+]
+
 /** Hardware toolbar items come straight from the catalog. */
 export const HARDWARE_ITEMS: ToolbarItem[] = HARDWARE.map((def) => ({
   id: def.id,
@@ -125,7 +185,7 @@ export const HARDWARE_ITEMS: ToolbarItem[] = HARDWARE.map((def) => ({
   dims: (u: UnitSystem) => def.defaults(u),
 }))
 
-export const ALL_ITEMS = [...SOLID_ITEMS, ...HOLE_ITEMS, ...HARDWARE_ITEMS]
+export const ALL_ITEMS = [...SOLID_ITEMS, ...HOLE_ITEMS, ...JOINERY_ITEMS, ...HARDWARE_ITEMS]
 
 export function toolbarItem(id: string): ToolbarItem | undefined {
   return ALL_ITEMS.find((t) => t.id === id)

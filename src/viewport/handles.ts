@@ -7,7 +7,7 @@
 
 import * as THREE from 'three'
 import type { Part } from '../model/types'
-import { DIM_SPECS } from '../model/types'
+import { DIM_SPECS, localSize } from '../model/types'
 
 export interface HandleSpec {
   dimKey: string
@@ -77,6 +77,25 @@ export function handleSpecs(part: Part): HandleSpec[] {
       specs.push({ dimKey: 'diameter', sign: 1, axis: 0, radial: true, localPos: [d.diameter / 2, -d.height / 2, 0] })
       specs.push({ dimKey: 'topDiameter', sign: 1, axis: 0, radial: true, localPos: [Math.max(d.topDiameter / 2, 6), d.height / 2, 0] })
       break
+    case 'dado':
+    case 'groove':
+    case 'rabbet':
+    case 'tenon':
+    case 'edge-profile': {
+      // joinery cutters: standard two-handles-per-axis-dim on the local bbox
+      // faces (localSize gives the unhosted fallback box). Integer dims — the
+      // edge-profile's 'profile' chip — get no handle.
+      const size = localSize(part)
+      for (const spec of DIM_SPECS[part.kind]) {
+        if (spec.axis === undefined || spec.integer) continue
+        for (const sign of [1, -1] as const) {
+          const pos: [number, number, number] = [0, 0, 0]
+          pos[spec.axis] = (sign * size[spec.axis]) / 2
+          specs.push({ dimKey: spec.key, sign, axis: spec.axis, radial: false, localPos: pos })
+        }
+      }
+      break
+    }
   }
   // sanity: only dims that exist in the spec table
   const valid = new Set(DIM_SPECS[part.kind].map((s) => s.key))

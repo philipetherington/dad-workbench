@@ -4,7 +4,7 @@ import type { Part } from '../model/types'
 import { dimSpecsFor } from '../model/types'
 import { formatLengthBare } from '../model/units'
 import type { ToolbarItem } from '../model/parts'
-import { SOLID_ITEMS, HOLE_ITEMS, HARDWARE_ITEMS } from '../model/parts'
+import { SOLID_ITEMS, HOLE_ITEMS, JOINERY_ITEMS, HARDWARE_ITEMS } from '../model/parts'
 import { useStore } from '../model/store'
 import { useBus } from '../viewport/bus'
 import { ShapeIcon, EyeIcon, PinIcon } from './Icons'
@@ -115,6 +115,26 @@ export function LeftPanel() {
             {item.label}
           </button>
         ))}
+      </div>
+
+      <div className="wb-section-title cut">JOINERY</div>
+      <div className="wb-shape-grid">
+        {JOINERY_ITEMS.map((item) => (
+          <button
+            key={item.id}
+            className="wb-shape-btn"
+            onClick={() => {
+              if (!showCutouts) setShowCutouts(true)
+              addAndFrame(item)
+            }}
+          >
+            <ShapeIcon id={item.id} />
+            {item.label}
+          </button>
+        ))}
+      </div>
+      <div className="wb-hint">
+        Drop a cut onto a board — it grips the board and runs its full length.
       </div>
 
       <div className="wb-section-title">HARDWARE</div>

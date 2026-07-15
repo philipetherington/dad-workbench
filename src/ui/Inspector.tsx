@@ -323,7 +323,29 @@ function SinglePanel({ part }: { part: Part }) {
       <div className="wb-group">
         <div className="wb-field-label">MEASUREMENTS</div>
         {dimSpecsFor(part).map((spec) =>
-          spec.integer ? (
+          spec.key === 'profile' && part.kind === 'edge-profile' ? (
+            // the router bit's shape, in plain words
+            <div key={spec.key}>
+              <div className="wb-field-label">{spec.label}</div>
+              <div className="wb-chip-row">
+                {(['Rounded', 'Angled', 'Scooped'] as const).map((label, i) => (
+                  <button
+                    key={label}
+                    className={`wb-chip${Math.round(part.dims.profile) === i ? ' on' : ''}`}
+                    onClick={() => store.getState().updatePartDims(part.id, { profile: i })}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : spec.key === 'span' && part.hostId ? (
+            // hosted cuts size themselves from the board — nothing to type
+            <div key={spec.key} className="wb-hint">
+              Runs the full length of{' '}
+              {doc.parts.find((p) => p.id === part.hostId)?.name ?? 'its board'} automatically.
+            </div>
+          ) : spec.integer ? (
             <div key={spec.key}>
               <div className="wb-field-label">{spec.label}</div>
               <div className="wb-dim-row">

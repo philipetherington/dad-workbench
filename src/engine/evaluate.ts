@@ -10,6 +10,7 @@
 
 import type { Manifold, ManifoldToplevel } from 'manifold-3d'
 import type { Doc, Part, Role } from '../model/types'
+import { edgeProfileIndex, hostOf, spanWithHost, tenonBodySize } from '../model/types'
 import { hardwareDef, type PrimSpec } from '../model/hardware'
 import { kernel } from './kernel'
 
@@ -46,7 +47,18 @@ class Scratch {
   }
 }
 
-function buildPrimitive(m: ManifoldToplevel, part: Part, scratch: Scratch): Manifold {
+/**
+ * The part's primitive in its local frame. `host` is the board a joinery
+ * cutter is attached to (when it exists): hosted cutters size their span —
+ * and a tenon its body — from the host at evaluation time, so the cut keeps
+ * fitting when the board is resized. Unhosted cutters fall back to their dims.
+ */
+function buildPrimitive(
+  m: ManifoldToplevel,
+  part: Part,
+  scratch: Scratch,
+  host?: Part,
+): Manifold {
   const { Manifold, CrossSection } = m
   const d = part.dims
   switch (part.kind) {
@@ -103,9 +115,78 @@ function buildPrimitive(m: ManifoldToplevel, part: Part, scratch: Scratch): Mani
         profile = CrossSection.union([rect, capL, capR])
         for (const c of [rect, cap, capL, capR]) c.delete()
       }
-      const prism = scratch.keep(m.Manifold.extrude(profile, d.deep, 0, 0, 1, true))
+      // scaleTop must be the Vec2 [1, 1]: the JS binding mis-reads a scalar
+      // (1 becomes [1, 0]) and tapers the far end to a knife edge
+      const prism = scratch.keep(m.Manifold.extrude(profile, d.deep, 0, 0, [1, 1], true))
       profile.delete()
       return scratch.keep(prism.rotate([-90, 0, 0]))
+    }
+    case 'dado':
+    case 'groove':
+    case 'rabbet': {
+      // One box: span along X (host-resolved), deep along Y, width across Z.
+      // Dado and groove share geometry; the kinds differ in how their span
+      // axis is meant to lie relative to the host (across vs along the board).
+      const span = spanWithHost(part, host)
+      return scratch.keep(Manifold.cube([span, d.deep, d.width], true))
+    }
+    case 'tenon': {
+      // Removed material = body box minus the tongue left standing — one
+      // Manifold difference. The tongue runs a hair long so no face of the
+      // subtraction is coplanar with the body's ends.
+      const [bodyT, bodyW] = tenonBodySize(part, host)
+      const body = scratch.keep(Manifold.cube([d.length, bodyT, bodyW], true))
+      const tongue = scratch.keep(
+        Manifold.cube([d.length + 0.02, d.tongueThickness, d.tongueWidth], true),
+      )
+      return scratch.keep(Manifold.difference(body, tongue))
+    }
+    case 'edge-profile': {
+      // What a router removes along one edge: a prism running along X whose
+      // cross-section lives in the local YZ plane. We draw the profile in 2D
+      // with x -> local Z and y -> local Y, extrude along +Z (centered), then
+      // rotate([0,-90,0]) so the extrusion runs along X. The profiled corner
+      // is the LOCAL TOP-FRONT edge: the +Y +Z corner of the size x size bbox.
+      const span = spanWithHost(part, host)
+      const s = d.size
+      const h = s / 2
+      let profile: InstanceType<typeof CrossSection>
+      switch (edgeProfileIndex(d.profile)) {
+        case 0: {
+          // roundover: corner square minus the quarter cylinder that remains
+          // (arc centered on the inner -y -z corner, radius = size)
+          const sq = CrossSection.square([s, s], true)
+          const circ = CrossSection.circle(s, 96)
+          const disc = circ.translate([-h, -h])
+          profile = CrossSection.difference(sq, disc)
+          for (const c of [sq, circ, disc]) c.delete()
+          break
+        }
+        case 1:
+          // chamfer: the 45° corner triangle, face to face
+          profile = new CrossSection([
+            [
+              [-h, h],
+              [h, -h],
+              [h, h],
+            ],
+          ])
+          break
+        case 2: {
+          // cove IS the quarter cylinder, scooped out of the edge
+          // (arc centered on the profiled corner itself, radius = size)
+          const sq = CrossSection.square([s, s], true)
+          const circ = CrossSection.circle(s, 96)
+          const disc = circ.translate([h, h])
+          profile = CrossSection.intersection(sq, disc)
+          for (const c of [sq, circ, disc]) c.delete()
+          break
+        }
+      }
+      // scaleTop [1, 1] — see the slot case
+      const prism = scratch.keep(m.Manifold.extrude(profile, span, 0, 0, [1, 1], true))
+      profile.delete()
+      return scratch.keep(prism.rotate([0, -90, 0]))
     }
   }
 }
@@ -144,9 +225,10 @@ function specsManifold(m: ManifoldToplevel, specs: PrimSpec[], scratch: Scratch)
  * translated so that center sits at part.position.
  * Chained rotates Z, then Y, then X compose to R = Rx·Ry·Rz, matching
  * three.js Euler 'XYZ' — keep these two in lockstep.
+ * `host` feeds hosted joinery cutters — see buildPrimitive.
  */
-function partManifold(m: ManifoldToplevel, part: Part, scratch: Scratch): Manifold {
-  const mf = buildPrimitive(m, part, scratch)
+function partManifold(m: ManifoldToplevel, part: Part, scratch: Scratch, host?: Part): Manifold {
+  const mf = buildPrimitive(m, part, scratch, host)
   return placed(mf, part.rotation, part.position, scratch)
 }
 
@@ -158,7 +240,7 @@ function cutterManifolds(m: ManifoldToplevel, doc: Doc, scratch: Scratch): Manif
   const out: Manifold[] = []
   for (const p of doc.parts) {
     if (p.role === 'hole') {
-      out.push(partManifold(m, p, scratch))
+      out.push(partManifold(m, p, scratch, hostOf(doc, p)))
     } else if (p.kind === 'hardware') {
       const def = hardwareDef(p.catalogId)
       if (!def) continue
@@ -216,7 +298,7 @@ export function evaluateScene(doc: Doc): EvalResult {
     const solidRecords: { id: string; mf: Manifold; bbox: EvalPart['bbox']; cutVolume: number }[] = []
 
     for (const part of doc.parts) {
-      const raw = partManifold(m, part, scratch)
+      const raw = partManifold(m, part, scratch, hostOf(doc, part))
       const bbox = toBBox(raw)
       let result = raw
       if (part.role === 'solid' && holesUnion) {
@@ -232,7 +314,7 @@ export function evaluateScene(doc: Doc): EvalResult {
     // A hole is idle when it removes no material from any solid.
     const holes = doc.parts.filter((p) => p.role === 'hole')
     for (const hole of holes) {
-      const hMf = partManifold(m, hole, scratch)
+      const hMf = partManifold(m, hole, scratch, hostOf(doc, hole))
       const hb = toBBox(hMf)
       let cuts = false
       for (const s of solidRecords) {
@@ -324,7 +406,7 @@ export function topOutline(doc: Doc, partId?: string): [number, number][][] {
     if (partId) {
       const part = doc.parts.find((p) => p.id === partId)
       if (!part) throw new Error('Part not found')
-      const raw = partManifold(m, part, scratch)
+      const raw = partManifold(m, part, scratch, hostOf(doc, part))
       const cutters = part.role === 'solid' ? cutterManifolds(m, doc, scratch) : []
       if (cutters.length > 0) {
         const holesUnion =

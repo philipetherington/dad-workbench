@@ -11,7 +11,22 @@
 
 export type UnitSystem = 'in' | 'mm'
 export type Role = 'solid' | 'hole' | 'hardware'
-export type ShapeKind = 'board' | 'cylinder' | 'sphere' | 'cone' | 'wedge' | 'slot' | 'hardware'
+export type ShapeKind =
+  | 'board'
+  | 'cylinder'
+  | 'sphere'
+  | 'cone'
+  | 'wedge'
+  | 'slot'
+  | 'hardware'
+  // Joinery cutters — always role 'hole'. Local frame for all five: the cut
+  // RUNS along local X ('span'), depth is local Y, and like every primitive
+  // they are built centered on the origin of their local bounding box.
+  | 'dado' // channel ACROSS a board
+  | 'groove' // channel ALONG a board (a dado turned 90° — the span axis differs relative to the host)
+  | 'rabbet' // step along an edge
+  | 'tenon' // cuts a board end, leaving a tongue
+  | 'edge-profile' // router profile along one edge (roundover / chamfer / cove)
 
 export interface Part {
   id: string
@@ -69,7 +84,9 @@ export interface DimSpec {
   integer?: boolean
   /**
    * Local axis this dimension stretches along (0=x, 1=y, 2=z), when it maps
-   * directly to a bounding-box side. Radial dims (diameter) omit it.
+   * to a bounding-box side. Radial dims (diameter) omit it. A tenon's tongue
+   * dims and an edge-profile's size stretch along their axis without spanning
+   * the whole bbox side; they still declare it for handles and labels.
    */
   axis?: 0 | 1 | 2
 }
@@ -102,6 +119,42 @@ export const DIM_SPECS: Record<ShapeKind, DimSpec[]> = {
     { key: 'length', label: 'Length', min: 1, axis: 0 },
     { key: 'width', label: 'Width', min: 0.5, axis: 2 },
     { key: 'deep', label: 'Deep', min: 0.5, axis: 1 },
+  ],
+  // --- joinery cutters (role 'hole') --------------------------------------
+  // 'span' is the UNHOSTED fallback: when the cutter is attached to a host
+  // board, evaluation replaces it with the host's extent along the cutter's
+  // local X plus a 2mm overshoot, so the cut always runs the full board even
+  // after the board is resized (see effectiveSpan / spanWithHost).
+  dado: [
+    { key: 'width', label: 'Channel width', min: 0.5, axis: 2 },
+    { key: 'deep', label: 'Deep', min: 0.5, axis: 1 },
+    { key: 'span', label: 'Runs', min: 1, axis: 0 },
+  ],
+  groove: [
+    { key: 'width', label: 'Channel width', min: 0.5, axis: 2 },
+    { key: 'deep', label: 'Deep', min: 0.5, axis: 1 },
+    { key: 'span', label: 'Runs', min: 1, axis: 0 },
+  ],
+  rabbet: [
+    { key: 'width', label: 'Width', min: 0.5, axis: 2 },
+    { key: 'deep', label: 'Deep', min: 0.5, axis: 1 },
+    { key: 'span', label: 'Runs', min: 1, axis: 0 },
+  ],
+  // The removed material is (body box [length, bodyT, bodyW]) minus (tongue
+  // box [length, tongueThickness, tongueWidth]); bodyT/bodyW come from the
+  // HOST at evaluation time (4x the tongue when unhosted — see tenonBodySize).
+  tenon: [
+    { key: 'length', label: 'Length', min: 1, axis: 0 },
+    { key: 'tongueThickness', label: 'Tongue thickness', min: 0.5, axis: 1 },
+    { key: 'tongueWidth', label: 'Tongue width', min: 1, axis: 2 },
+  ],
+  // 'profile' encodes the router bit: 0 = roundover, 1 = chamfer, 2 = cove
+  // (see EDGE_PROFILE_NAMES / edgeProfileIndex). The profiled corner is the
+  // cutter's local TOP-FRONT edge: the +Y +Z corner of its bounding box.
+  'edge-profile': [
+    { key: 'size', label: 'Size', min: 0.5, axis: 1 },
+    { key: 'span', label: 'Runs', min: 1, axis: 0 },
+    { key: 'profile', label: 'Shape', min: 0, integer: true },
   ],
   // hardware params come from the catalog entry — see dimSpecsFor()
   hardware: [],
@@ -162,9 +215,94 @@ export function localSize(part: Part): [number, number, number] {
       // the engine clamps a slot's width to its length (a wider-than-long
       // slot is just a circle of diameter = length)
       return [d.length, d.deep, Math.min(d.width, d.length)]
+    case 'dado':
+    case 'groove':
+    case 'rabbet':
+      // span along X, deep along Y, width across Z. Uses dims.span (the
+      // unhosted fallback) — the engine resolves the hosted span itself.
+      return [d.span, d.deep, d.width]
+    case 'tenon':
+      // unhosted fallback body: 4x the tongue each way (hosted, the engine
+      // sizes the body from the host at eval time — see tenonBodySize)
+      return [d.length, 4 * d.tongueThickness, 4 * d.tongueWidth]
+    case 'edge-profile':
+      // a size x size prism running along X (the true shape is within it)
+      return [d.span, d.size, d.size]
     case 'hardware':
       return hardwareHooks?.localSize(part.catalogId ?? '', d) ?? [10, 10, 10]
   }
+}
+
+// --------------------------------------------------------- joinery helpers
+
+/** Cutter kinds whose 'span' dim is replaced by the host's extent at eval time. */
+export const SPAN_KINDS: ReadonlySet<ShapeKind> = new Set([
+  'dado',
+  'groove',
+  'rabbet',
+  'edge-profile',
+])
+
+/** Extra length added to host-derived sizes so the cut always clears the faces. */
+export const SPAN_OVERSHOOT_MM = 2
+
+/** The host board a part is attached to, if it exists in the doc. */
+export function hostOf(doc: Doc, part: Part): Part | undefined {
+  return part.hostId ? doc.parts.find((p) => p.id === part.hostId) : undefined
+}
+
+/**
+ * Extent of the host's world-axis-aligned bounding box measured along the
+ * cutter's local axis, expressed in world space (column `localAxis` of the
+ * cutter's rotation matrix). This is what lets a hosted channel keep running
+ * the full board no matter how either part is turned.
+ */
+export function hostExtentAlong(cutter: Part, host: Part, localAxis: 0 | 1 | 2): number {
+  const R = rotationMatrix(cutter.rotation)
+  const dir = [R[0][localAxis], R[1][localAxis], R[2][localAxis]]
+  const ws = worldSize(host)
+  return Math.abs(dir[0]) * ws[0] + Math.abs(dir[1]) * ws[1] + Math.abs(dir[2]) * ws[2]
+}
+
+/**
+ * The span a cutter actually runs given its (possibly absent) host:
+ * hosted -> the host's extent along the cutter's local X + 2mm overshoot,
+ * unhosted -> dims.span exactly as typed.
+ */
+export function spanWithHost(part: Part, host: Part | undefined): number {
+  if (!host || !SPAN_KINDS.has(part.kind)) return part.dims.span
+  return hostExtentAlong(part, host, 0) + SPAN_OVERSHOOT_MM
+}
+
+/**
+ * Doc-level convenience for the exporters: resolve a cutter's effective span
+ * the same way the engine does (the engine passes the host Part directly).
+ */
+export function effectiveSpan(doc: Doc, part: Part): number {
+  return spanWithHost(part, hostOf(doc, part))
+}
+
+/**
+ * The tenon's removed-material box across the board end: [bodyThickness,
+ * bodyWidth] along the cutter's local Y and Z. Hosted -> the host's extents
+ * (+ overshoot so the cut clears the faces); unhosted -> 4x the tongue,
+ * matching localSize()'s fallback.
+ */
+export function tenonBodySize(part: Part, host: Part | undefined): [number, number] {
+  if (!host) return [4 * part.dims.tongueThickness, 4 * part.dims.tongueWidth]
+  return [
+    hostExtentAlong(part, host, 1) + SPAN_OVERSHOOT_MM,
+    hostExtentAlong(part, host, 2) + SPAN_OVERSHOOT_MM,
+  ]
+}
+
+/** Plain names for the edge-profile 'profile' dim, indexed 0/1/2. */
+export const EDGE_PROFILE_NAMES = ['Roundover', 'Chamfer', 'Cove'] as const
+
+/** The 'profile' dim decoded and clamped: 0 = roundover, 1 = chamfer, 2 = cove. */
+export function edgeProfileIndex(v: number | undefined): 0 | 1 | 2 {
+  const n = Math.round(v ?? 0)
+  return n <= 0 ? 0 : n >= 2 ? 2 : 1
 }
 
 /** Rotation matrix R = Rx·Ry·Rz from Euler XYZ degrees (three.js 'XYZ' order). */
