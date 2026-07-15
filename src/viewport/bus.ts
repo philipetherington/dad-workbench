@@ -39,6 +39,9 @@ interface BusState {
   /** Whole-scene wireframe view (quiet power feature, toggled with 'z'). */
   wireframe: boolean
   setWireframe: (v: boolean) => void
+  /** Which parametric builder sheet is open (Drawer… / Door…). */
+  builder: 'drawer' | 'door' | null
+  setBuilder: (b: 'drawer' | 'door' | null) => void
   kernelState: 'loading' | 'ready' | 'failed'
   setKernelState: (s: 'loading' | 'ready' | 'failed') => void
   flashes: Flash[]
@@ -69,6 +72,8 @@ export const useBus = create<BusState>((set) => ({
   setShowCutouts: (showCutouts) => set({ showCutouts }),
   wireframe: false,
   setWireframe: (wireframe) => set({ wireframe }),
+  builder: null,
+  setBuilder: (builder) => set({ builder }),
   kernelState: 'loading',
   setKernelState: (kernelState) => set({ kernelState }),
   flashes: [],

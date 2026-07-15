@@ -121,6 +121,7 @@ export class World {
   private dragPointerId: number | null = null
   private evalQueued = false
   private evalDirty = true
+  private evalScheduled = false
   private disposed = false
   private lastTime = 0
   private outOfViewSince: number | null = null
@@ -215,6 +216,7 @@ export class World {
 
     this.resize()
     this.showEverything(false)
+    this.markDirty() // first evaluation must not wait for a visible frame
     requestAnimationFrame(this.frame)
   }
 
@@ -256,6 +258,21 @@ export class World {
 
   private markDirty() {
     this.evalDirty = true
+    // Evaluation must NOT wait for the render loop: browsers pause rAF in
+    // hidden/occluded tabs, and a doc that loads in a background tab still
+    // needs geometry (exports, autosave-adjacent UI, tests driving the app).
+    // Coalesce to one eval per macrotask; the rAF loop stays as a fallback.
+    if (!this.evalScheduled) {
+      this.evalScheduled = true
+      window.setTimeout(() => {
+        this.evalScheduled = false
+        if (this.disposed || !this.evalDirty || this.evalQueued) return
+        this.evalQueued = true
+        this.evalDirty = false
+        this.runEval()
+        this.evalQueued = false
+      }, 0)
+    }
   }
 
   private runEval() {
