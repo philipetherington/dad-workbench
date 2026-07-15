@@ -23,6 +23,29 @@ const MAGNET_MM = 6.35 // 1/4" capture radius for face magnetism
 const SELECT_ORANGE = new THREE.Color('#ff7a1a')
 const OVERLAP_AMBER = new THREE.Color('#d99a00')
 
+/**
+ * A soft round blob, dark in the centre fading to nothing — the alpha falloff
+ * for contact shadows. Squashed to a piece's footprint it reads as a soft
+ * grounding shadow with a naturally soft edge (no shadow map needed).
+ */
+function makeContactShadowTexture(): THREE.CanvasTexture {
+  const s = 128
+  const canvas = document.createElement('canvas')
+  canvas.width = s
+  canvas.height = s
+  const ctx = canvas.getContext('2d')!
+  const g = ctx.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2)
+  g.addColorStop(0, 'rgba(255,255,255,1)')
+  g.addColorStop(0.45, 'rgba(255,255,255,0.85)')
+  g.addColorStop(0.8, 'rgba(255,255,255,0.25)')
+  g.addColorStop(1, 'rgba(255,255,255,0)')
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, s, s)
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
+}
+
 /** Dispose every geometry/material in a subtree (textures are shared; not touched). */
 function disposeSubtree(root: THREE.Object3D) {
   root.traverse((obj) => {
@@ -79,7 +102,8 @@ export class World {
   private mount: HTMLElement
   private labelLayer: HTMLElement
 
-  private sun!: THREE.DirectionalLight
+  private contactGroup!: THREE.Group
+  private contactShadowTex!: THREE.CanvasTexture
   private benchGroup = new THREE.Group()
   private benchUnits: string | null = null
   private partsGroup = new THREE.Group()
@@ -104,8 +128,11 @@ export class World {
     this.mount = mount
     this.renderer = new THREE.WebGLRenderer({ antialias: true })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-    this.renderer.shadowMap.enabled = true
-    this.renderer.shadowMap.type = THREE.PCFShadowMap
+    // No real-time shadow map. Casting a directional shadow onto a
+    // room-sized flat benchtop is a losing battle (acne at grazing angles no
+    // matter the bias/frustum tuning). Grounding comes from soft per-piece
+    // contact shadows instead — see buildContactShadow / updateContactShadows.
+    this.renderer.shadowMap.enabled = false
     this.renderer.setClearColor('#e9e4dc')
     mount.appendChild(this.renderer.domElement)
     this.renderer.domElement.style.display = 'block'
@@ -118,17 +145,21 @@ export class World {
     this.rig = new CameraRig(1)
     this.scene.fog = new THREE.Fog('#e9e4dc', 6000, 16000)
 
-    // lights — the sun's shadow frustum is refitted to the work every time the
-    // scene changes (a fixed, bench-sized frustum wastes almost all of the
-    // shadow map on empty wood and shows as banding across the benchtop)
-    const hemi = new THREE.HemisphereLight('#fdf6ea', '#9a8a76', 1.05)
+    // Lights are for shading only (no shadow casting). A fixed direction keeps
+    // the shading consistent as pieces move around the bench.
+    const hemi = new THREE.HemisphereLight('#fdf6ea', '#9a8a76', 1.0)
     this.scene.add(hemi)
-    const sun = new THREE.DirectionalLight('#fff2dc', 1.6)
-    sun.castShadow = true
-    sun.shadow.mapSize.set(4096, 4096)
+    const sun = new THREE.DirectionalLight('#fff2dc', 1.5)
+    sun.position.set(900, 1500, 650)
     this.scene.add(sun)
-    this.scene.add(sun.target)
-    this.sun = sun
+    // a soft fill from the opposite side so shaded faces don't go muddy
+    const fill = new THREE.DirectionalLight('#e9ecff', 0.35)
+    fill.position.set(-700, 600, -500)
+    this.scene.add(fill)
+
+    this.contactGroup = new THREE.Group()
+    this.contactShadowTex = makeContactShadowTexture()
+    this.scene.add(this.contactGroup)
 
     this.scene.add(this.benchGroup)
     this.scene.add(this.partsGroup)
@@ -199,6 +230,8 @@ export class World {
     if (this.handleGroup) disposeSubtree(this.handleGroup)
     disposeSubtree(this.liftHandle)
     disposeSubtree(this.benchGroup)
+    disposeSubtree(this.contactGroup)
+    this.contactShadowTex.dispose()
     this.dropLine.geometry.dispose()
     ;(this.dropLine.material as THREE.Material).dispose()
     this.stripes.dispose()
@@ -247,8 +280,6 @@ export class World {
               })
             : new THREE.MeshStandardMaterial({ roughness: 0.75, metalness: 0.02 })
         const mesh = new THREE.Mesh(new THREE.BufferGeometry(), mat)
-        mesh.castShadow = part.role === 'solid'
-        mesh.receiveShadow = part.role === 'solid'
         mesh.userData.partId = p.id
         vis = { mesh, edges: null }
         this.visuals.set(p.id, vis)
@@ -277,48 +308,65 @@ export class World {
     }
     this.applyCutoutVisibility()
     this.refreshSelectionVisuals()
-    this.fitSunToScene()
+    this.updateContactShadows()
     if (!this.drag) this.rig.driftTargetToward(this.sceneBBox())
   }
 
   /**
-   * Aim the sun at the work.
-   *
-   * The frustum must cover every surface that RECEIVES a shadow, not just the
-   * pieces that cast one: fragments outside it sample the shadow map's clamped
-   * edge texel, which paints a staircase of fake shadow across the benchtop.
-   * The whole bench receives, so the frustum never shrinks below the bench —
-   * it only grows, for projects bigger than the bench itself.
+   * A soft dark quad on the bench under each solid piece — the whole app's
+   * grounding, replacing the real-time shadow map. It can't acne because it
+   * isn't a shadow map: it's a textured sprite sized to the piece's footprint,
+   * fading out as the piece is lifted off the bench.
    */
-  private fitSunToScene() {
-    const box = this.sceneBBox()
-    const center = box.getCenter(new THREE.Vector3())
-    const radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 150)
-    const ext = Math.max(BENCH_SIZE / 2 + 60, radius * 1.4)
+  private updateContactShadows() {
+    const solids = useBus.getState().result?.parts.filter((p) => p.role === 'solid') ?? []
 
-    const dir = new THREE.Vector3(0.55, 1.15, 0.42).normalize()
-    const distance = Math.max(ext * 2.2, radius * 3)
-    // keep the sun centred over the BENCH, not the work, so the frustum that
-    // covers the bench stays put and the shadows don't swim as pieces move
-    const pivot = new THREE.Vector3(center.x * 0.25, 0, center.z * 0.25)
-    this.sun.position.copy(pivot).addScaledVector(dir, distance)
-    this.sun.target.position.copy(pivot)
-    this.sun.target.updateMatrixWorld()
+    // grow/shrink the pool of quads to match the piece count
+    while (this.contactGroup.children.length < solids.length) {
+      const mat = new THREE.MeshBasicMaterial({
+        map: this.contactShadowTex,
+        transparent: true,
+        depthWrite: false,
+        // pushed toward the camera in the depth test so it can never fight the
+        // benchtop it lies just above, at any grazing angle
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
+        color: '#3a2c1a',
+        opacity: 0.4,
+      })
+      const quad = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat)
+      quad.rotation.x = -Math.PI / 2
+      this.contactGroup.add(quad)
+    }
+    while (this.contactGroup.children.length > solids.length) {
+      const quad = this.contactGroup.children.pop() as THREE.Mesh
+      quad.geometry.dispose()
+      ;(quad.material as THREE.Material).dispose()
+    }
 
-    const cam = this.sun.shadow.camera
-    cam.left = -ext
-    cam.right = ext
-    cam.top = ext
-    cam.bottom = -ext
-    cam.near = distance * 0.15
-    cam.far = distance + ext * 3
-    cam.updateProjectionMatrix()
-
-    // World units are millimetres. The depth bias has to be scaled to that or
-    // the benchtop self-shadows in bands; normalBias does the real work here.
-    this.sun.shadow.bias = -0.0006
-    this.sun.shadow.normalBias = 1.8
+    for (let i = 0; i < solids.length; i++) {
+      const { bbox } = solids[i]
+      const quad = this.contactGroup.children[i] as THREE.Mesh
+      const w = bbox.max[0] - bbox.min[0]
+      const d = bbox.max[2] - bbox.min[2]
+      const cx = (bbox.min[0] + bbox.max[0]) / 2
+      const cz = (bbox.min[2] + bbox.max[2]) / 2
+      // a soft margin so the shadow reads bigger and softer than the part
+      const pad = Math.max(Math.min(w, d) * 0.4, 8)
+      // BELOW the piece bottoms (y=0) and above the benchtop (y=-1): the quad
+      // must never slice through a piece — a plane at y>0 cuts every resting
+      // piece near its base and flickers as the camera moves past that seam.
+      quad.position.set(cx, -0.4, cz)
+      quad.scale.set(w + pad * 2, d + pad * 2, 1)
+      // fade with height off the bench, gone by ~2 inches up
+      const lift = Math.max(bbox.min[1], 0)
+      const mat = quad.material as THREE.MeshBasicMaterial
+      mat.opacity = 0.42 * Math.max(0, 1 - lift / 50)
+      quad.visible = mat.opacity > 0.01
+    }
   }
+
 
   private disposeVisual(v: PartVisual) {
     v.mesh.geometry.dispose()
@@ -349,15 +397,22 @@ export class World {
       new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 }),
     )
     bench.rotation.x = -Math.PI / 2
-    bench.position.y = -0.5 // avoid z-fighting with part bottoms at y=0
-    bench.receiveShadow = true
+    // Sit the benchtop a hair below the pieces (which rest at y=0) so there is
+    // clear room for the contact-shadow quad between them, and no coplanar
+    // fight with part bottoms.
+    bench.position.y = -1.0
+    bench.renderOrder = 0
     this.benchGroup.add(bench)
-    // apron so the bench reads as a physical object
+    // Apron — the thick slab edge under the top, so the bench reads as a solid
+    // object. It is inset (narrower than the top) and its top face sits well
+    // BELOW the benchtop plane: a box top coplanar with the benchtop z-fights
+    // into a staircase across the whole surface. The benchtop overhangs it, so
+    // the drop is never visible.
     const apron = new THREE.Mesh(
-      new THREE.BoxGeometry(BENCH_SIZE, 90, BENCH_SIZE),
+      new THREE.BoxGeometry(BENCH_SIZE - 40, 90, BENCH_SIZE - 40),
       new THREE.MeshStandardMaterial({ color: '#9c7c58', roughness: 0.9 }),
     )
-    apron.position.y = -46
+    apron.position.y = -49 // top face at y = -4, a clear 3mm below the benchtop
     this.benchGroup.add(apron)
   }
 

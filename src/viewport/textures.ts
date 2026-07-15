@@ -71,7 +71,22 @@ export function benchTexture(units: UnitSystem): THREE.CanvasTexture {
   drawGrid(major, 'rgba(90, 65, 40, 0.22)', 1.5)
   drawGrid(strong, 'rgba(90, 65, 40, 0.34)', 2.5)
 
+  // Dissolve the fine grid and plank seams into flat wood toward the edges.
+  // Those are the only high-frequency marks on the bench; out near the rim,
+  // seen at a grazing angle, they alias into a moiré staircase no amount of
+  // mipmapping fully removes. The grid is a measuring aid for the work, which
+  // lives near the middle — so keep it crisp there and let it fade away.
+  // Reach FULLY flat wood before the texture's edges (corners sit at r≈0.707).
+  // Any residual grid left in the corners still aliases into a faint staircase
+  // at extreme grazing, so the outer half must be pure wood — zero grid there.
+  const fade = ctx.createRadialGradient(half, half, px * 0.16, half, half, px * 0.5)
+  fade.addColorStop(0, 'rgba(205, 178, 137, 0)')
+  fade.addColorStop(1, 'rgba(205, 178, 137, 1)')
+  ctx.fillStyle = fade
+  ctx.fillRect(0, 0, px, px)
+
   // etched rule along the front edge (+z side = bottom of canvas) and left edge
+  // — drawn AFTER the fade so the measuring numbers stay crisp at the rim
   ctx.fillStyle = 'rgba(60, 42, 25, 0.75)'
   ctx.strokeStyle = 'rgba(60, 42, 25, 0.75)'
   ctx.font = `${Math.round(26)}px system-ui, sans-serif`
@@ -98,7 +113,13 @@ export function benchTexture(units: UnitSystem): THREE.CanvasTexture {
   ctx.fillText('0', half, px - 34)
 
   const tex = new THREE.CanvasTexture(canvas)
-  tex.anisotropy = 8
+  // The benchtop is a big plane seen at grazing angles; without mipmaps + high
+  // anisotropy the etched grid lines shimmer into moiré. three.js clamps the
+  // anisotropy request to the GPU's real maximum.
+  tex.anisotropy = 16
+  tex.generateMipmaps = true
+  tex.minFilter = THREE.LinearMipmapLinearFilter
+  tex.magFilter = THREE.LinearFilter
   tex.colorSpace = THREE.SRGBColorSpace
   return tex
 }
