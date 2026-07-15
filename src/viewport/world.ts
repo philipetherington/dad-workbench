@@ -16,7 +16,7 @@ import { positionsToGeometry } from '../engine/toThree'
 import { kernelReady } from '../engine/kernel'
 import { useBus } from './bus'
 import { CameraRig } from './CameraRig'
-import { benchTexture, stripeTexture, BENCH_SIZE } from './textures'
+import { benchMaterial, stripeTexture, BENCH_SIZE } from './textures'
 import { buildHandles, buildLiftHandle, type HandleSpec } from './handles'
 
 const MAGNET_MM = 6.35 // 1/4" capture radius for face magnetism
@@ -354,10 +354,10 @@ export class World {
       const cz = (bbox.min[2] + bbox.max[2]) / 2
       // a soft margin so the shadow reads bigger and softer than the part
       const pad = Math.max(Math.min(w, d) * 0.4, 8)
-      // BELOW the piece bottoms (y=0) and above the benchtop (y=-1): the quad
+      // BELOW the piece bottoms (y=0) and above the benchtop (y=-2): the quad
       // must never slice through a piece — a plane at y>0 cuts every resting
       // piece near its base and flickers as the camera moves past that seam.
-      quad.position.set(cx, -0.4, cz)
+      quad.position.set(cx, -0.8, cz)
       quad.scale.set(w + pad * 2, d + pad * 2, 1)
       // fade with height off the bench, gone by ~2 inches up
       const lift = Math.max(bbox.min[1], 0)
@@ -391,16 +391,17 @@ export class World {
         m.dispose()
       }
     }
-    const tex = benchTexture(doc.units)
+    // Solid wood + an analytic shader grid — never moirés (see benchMaterial).
     const bench = new THREE.Mesh(
       new THREE.PlaneGeometry(BENCH_SIZE, BENCH_SIZE),
-      new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 }),
+      benchMaterial(doc.units),
     )
     bench.rotation.x = -Math.PI / 2
-    // Sit the benchtop a hair below the pieces (which rest at y=0) so there is
-    // clear room for the contact-shadow quad between them, and no coplanar
-    // fight with part bottoms.
-    bench.position.y = -1.0
+    // Layering, bottom to top: apron top (-12) « benchtop (-2) « contact
+    // shadow quads (-0.8) « piece bottoms (0). Every gap is ≥0.8mm — an order
+    // of magnitude above worst-case depth precision with the 50mm near plane,
+    // so nothing can z-fight at any angle or zoom.
+    bench.position.y = -2.0
     bench.renderOrder = 0
     this.benchGroup.add(bench)
     // Apron — the thick slab edge under the top, so the bench reads as a solid
@@ -412,7 +413,7 @@ export class World {
       new THREE.BoxGeometry(BENCH_SIZE - 40, 90, BENCH_SIZE - 40),
       new THREE.MeshStandardMaterial({ color: '#9c7c58', roughness: 0.9 }),
     )
-    apron.position.y = -49 // top face at y = -4, a clear 3mm below the benchtop
+    apron.position.y = -57 // top face at y = -12, a clear 10mm below the benchtop
     this.benchGroup.add(apron)
   }
 

@@ -20,25 +20,18 @@ export function benchTexture(units: UnitSystem): THREE.CanvasTexture {
   const ctx = canvas.getContext('2d')!
   const scale = px / BENCH_SIZE // px per mm
 
-  // planks
+  // A calm, near-uniform wood surface. High-contrast per-plank shading and
+  // grain lines are exactly the kind of high-frequency detail that aliases
+  // into wonky staggered bands and moiré when this big plane is minified and
+  // seen at an angle. Keep only very faint, widely-spaced plank seams so the
+  // bench still reads as wood without giving the texture filter anything to
+  // fight.
   ctx.fillStyle = '#cdb289'
   ctx.fillRect(0, 0, px, px)
-  const plank = 140 * scale
-  for (let i = 0; i < px / plank; i++) {
-    const shade = 0.94 + 0.09 * ((i * 2654435761) % 7) / 7
-    ctx.fillStyle = `rgb(${Math.round(205 * shade)}, ${Math.round(178 * shade)}, ${Math.round(137 * shade)})`
-    ctx.fillRect(i * plank, 0, plank + 1, px)
-    // subtle grain
-    ctx.strokeStyle = 'rgba(120, 90, 55, 0.10)'
-    ctx.lineWidth = 1
-    for (let g = 0; g < 4; g++) {
-      const gx = i * plank + ((g + 1) * plank) / 5 + (((i * 7 + g * 13) % 9) - 4) * scale * 4
-      ctx.beginPath()
-      ctx.moveTo(gx, 0)
-      ctx.bezierCurveTo(gx + 8, px * 0.3, gx - 8, px * 0.7, gx, px)
-      ctx.stroke()
-    }
-    ctx.strokeStyle = 'rgba(90, 65, 40, 0.28)'
+  const plank = 300 * scale // wide boards → few, low-frequency seams
+  ctx.strokeStyle = 'rgba(90, 65, 40, 0.10)'
+  ctx.lineWidth = 1.5
+  for (let i = 1; i < px / plank; i++) {
     ctx.beginPath()
     ctx.moveTo(i * plank, 0)
     ctx.lineTo(i * plank, px)
@@ -122,6 +115,71 @@ export function benchTexture(units: UnitSystem): THREE.CanvasTexture {
   tex.magFilter = THREE.LinearFilter
   tex.colorSpace = THREE.SRGBColorSpace
   return tex
+}
+
+/**
+ * Benchtop material: a solid wood surface with the measuring grid drawn
+ * ANALYTICALLY in the fragment shader (not sampled from a texture). Each grid
+ * line's width is derived from the on-screen pixel derivative (fwidth), so it
+ * stays one crisp line at every distance and every viewing angle and can never
+ * moiré or alias into bands — the failure mode of any raster grid on a big
+ * ground plane. The grid fades out with distance from the bench centre so the
+ * far reaches read as calm, empty wood.
+ */
+export function benchMaterial(units: UnitSystem): THREE.MeshStandardMaterial {
+  const minor = units === 'in' ? IN : 50 // 1" or 50mm
+  const major = units === 'in' ? 12 * IN : 250 // 1' or 250mm
+
+  const mat = new THREE.MeshStandardMaterial({ color: '#cbb083', roughness: 0.96, metalness: 0 })
+
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uMinor = { value: minor }
+    shader.uniforms.uMajor = { value: major }
+    shader.uniforms.uFadeStart = { value: BENCH_SIZE * 0.16 }
+    shader.uniforms.uFadeEnd = { value: BENCH_SIZE * 0.52 }
+
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vBenchWorld;')
+      .replace(
+        '#include <begin_vertex>',
+        '#include <begin_vertex>\n  vBenchWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;',
+      )
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        varying vec3 vBenchWorld;
+        uniform float uMinor;
+        uniform float uMajor;
+        uniform float uFadeStart;
+        uniform float uFadeEnd;
+        // 1.0 on a grid line, 0.0 between — width follows the pixel footprint
+        float benchGrid(vec2 p, float spacing, float widthPx) {
+          vec2 c = p / spacing;
+          vec2 d = abs(fract(c - 0.5) - 0.5) / fwidth(c);
+          float line = min(d.x, d.y);
+          return 1.0 - clamp(line - widthPx * 0.5, 0.0, 1.0);
+        }`,
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+        {
+          vec2 gp = vBenchWorld.xz;
+          float minorL = benchGrid(gp, uMinor, 1.0);
+          float majorL = benchGrid(gp, uMajor, 1.4);
+          float r = length(gp);
+          float fade = 1.0 - smoothstep(uFadeStart, uFadeEnd, r);
+          vec3 lineCol = vec3(0.30, 0.23, 0.15);
+          float amt = max(minorL * 0.16, majorL * 0.34) * fade;
+          diffuseColor.rgb = mix(diffuseColor.rgb, lineCol, amt);
+        }`,
+      )
+  }
+  // distinct cache key so this program isn't shared with plain standard mats
+  mat.customProgramCacheKey = () => `bench-grid-${units}`
+  return mat
 }
 
 /** Diagonal red stripes for cutout ghosts (stripes carry meaning, not just hue). */

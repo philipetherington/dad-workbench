@@ -38,11 +38,15 @@ export class CameraRig {
   private targetT = this.target.clone()
 
   /** Zoom limits, updated from the scene size on every fit. */
-  private distMin = 200
+  private distMin = 250
   private distMax = 9000
 
   constructor(aspect: number) {
-    this.camera = new THREE.PerspectiveCamera(30, aspect, 1, 40000)
+    // near=50 (5cm), NOT 1: depth precision goes as distance²/near, and with
+    // near=1 in a mm-unit scene the buffer can't tell surfaces 2mm apart from
+    // a few metres away — the benchtop stack z-fights into angle-dependent
+    // bands. 5cm is still far closer than the zoom clamp ever allows.
+    this.camera = new THREE.PerspectiveCamera(30, aspect, 50, 30000)
     this.apply(this.yaw, this.pitch, this.dist, this.target)
   }
 
@@ -111,7 +115,9 @@ export class CameraRig {
     const vHalf = (this.camera.fov * DEG) / 2
     const hHalf = Math.atan(Math.tan(vHalf) * this.camera.aspect)
     const dist = (radius / Math.tan(Math.min(vHalf, hHalf))) * 1.25
-    this.distMin = radius * 0.35
+    // floor of 250mm keeps the camera an order of magnitude beyond the 50mm
+    // near plane — nothing in a bench-scale app needs a 4cm-away camera
+    this.distMin = Math.max(radius * 0.35, 250)
     this.distMax = Math.max(dist * 4, 2500)
     this.distT = THREE.MathUtils.clamp(dist, this.distMin, this.distMax)
     this.targetT.copy(center)
