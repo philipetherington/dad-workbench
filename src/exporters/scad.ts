@@ -10,6 +10,7 @@
 // rotate(X) rotate(Y) rotate(Z) <primitive>.
 
 import type { Doc, Part } from '../model/types'
+import { hardwareDef } from '../model/hardware'
 import { formatLength } from '../model/units'
 
 function num(v: number): string {
@@ -73,7 +74,43 @@ function primitive(doc: Doc, part: Part): string[] {
         `}`,
       ]
     }
+    case 'hardware':
+      // hardware bodies never export (they're bought, not made) — their
+      // BORES are emitted separately, see hardwareCutterModule
+      return []
   }
+}
+
+/** The bores a hardware item makes, as one module: part transform outside, each cutter's local transform inside. */
+function hardwareCutterModule(doc: Doc, part: Part, name: string): string | null {
+  const def = hardwareDef(part.catalogId)
+  if (!def) return null
+  const specs = def.cutters(part.dims)
+  const [px, py, pz] = part.position
+  const [rx, ry, rz] = part.rotation
+  const outer: string[] = []
+  if (px !== 0 || py !== 0 || pz !== 0) outer.push(`translate([${num(px)}, ${num(py)}, ${num(pz)}])`)
+  if (rx !== 0) outer.push(`rotate([${num(rx)}, 0, 0])`)
+  if (ry !== 0) outer.push(`rotate([0, ${num(ry)}, 0])`)
+  if (rz !== 0) outer.push(`rotate([0, 0, ${num(rz)}])`)
+
+  const lines = [`module ${name}() { // ${part.name} — bores only`]
+  lines.push(`  ${outer.length ? outer.join(' ') + ' ' : ''}union() {`)
+  for (const spec of specs) {
+    const inner: string[] = []
+    const [sx, sy, sz] = spec.position
+    const [srx, sry, srz] = spec.rotation ?? [0, 0, 0]
+    if (sx !== 0 || sy !== 0 || sz !== 0) inner.push(`translate([${num(sx)}, ${num(sy)}, ${num(sz)}])`)
+    if (srx !== 0) inner.push(`rotate([${num(srx)}, 0, 0])`)
+    if (sry !== 0) inner.push(`rotate([0, ${num(sry)}, 0])`)
+    if (srz !== 0) inner.push(`rotate([0, 0, ${num(srz)}])`)
+    const prim = primitive(doc, { kind: spec.kind, dims: spec.dims } as Part)
+    lines.push(`    ${inner.length ? inner.join(' ') + ' ' : ''}${prim[0] ?? ''}`)
+    lines.push(...prim.slice(1).map((l) => `    ${l}`))
+  }
+  lines.push('  }')
+  lines.push('}')
+  return lines.join('\n')
 }
 
 function partModule(doc: Doc, part: Part, name: string): string {
@@ -99,9 +136,16 @@ function partModule(doc: Doc, part: Part, name: string): string {
 export function exportSCAD(doc: Doc): string {
   const solids = doc.parts.filter((p) => p.role === 'solid')
   const holes = doc.parts.filter((p) => p.role === 'hole')
+  // hardware items with bores cut wood too (a cup hinge IS its 35mm bore)
+  const hardware = doc.parts.filter(
+    (p) => p.kind === 'hardware' && (hardwareDef(p.catalogId)?.cutters(p.dims).length ?? 0) > 0,
+  )
   const taken = new Set<string>()
   const solidNames = solids.map((p) => ident('piece', p.name, taken))
-  const holeNames = holes.map((p) => ident('hole', p.name, taken))
+  const holeNames = [
+    ...holes.map((p) => ident('hole', p.name, taken)),
+    ...hardware.map((p) => ident('hole', p.name, taken)),
+  ]
 
   const out: string[] = [
     `// ${doc.name}`,
@@ -116,7 +160,7 @@ export function exportSCAD(doc: Doc): string {
     'module workbench_model() {',
   ]
 
-  if (holes.length > 0 && solids.length > 0) {
+  if (holeNames.length > 0 && solids.length > 0) {
     out.push('  difference() {')
     if (solids.length > 1) out.push('    union() {')
     const indent = solids.length > 1 ? '      ' : '    '
@@ -137,6 +181,13 @@ export function exportSCAD(doc: Doc): string {
   holes.forEach((p, i) => {
     out.push(partModule(doc, p, holeNames[i]))
     out.push('')
+  })
+  hardware.forEach((p, i) => {
+    const mod = hardwareCutterModule(doc, p, holeNames[holes.length + i])
+    if (mod) {
+      out.push(mod)
+      out.push('')
+    }
   })
 
   return out.join('\n').replace(/\n{3,}/g, '\n\n')

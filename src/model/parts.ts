@@ -4,6 +4,7 @@
 // actually held (a Board is a two-foot 1x6, a Dowel is 3/4" x 12" lying down).
 
 import { IN } from './units'
+import { HARDWARE } from './hardware'
 import type { Doc, Part, Role, ShapeKind, UnitSystem } from './types'
 
 /** Warm maple for new solids; selection state carries the accent color. */
@@ -115,7 +116,16 @@ export const HOLE_ITEMS: ToolbarItem[] = [
   },
 ]
 
-export const ALL_ITEMS = [...SOLID_ITEMS, ...HOLE_ITEMS]
+/** Hardware toolbar items come straight from the catalog. */
+export const HARDWARE_ITEMS: ToolbarItem[] = HARDWARE.map((def) => ({
+  id: def.id,
+  label: def.label,
+  kind: 'hardware' as const,
+  role: 'hardware' as const,
+  dims: (u: UnitSystem) => def.defaults(u),
+}))
+
+export const ALL_ITEMS = [...SOLID_ITEMS, ...HOLE_ITEMS, ...HARDWARE_ITEMS]
 
 export function toolbarItem(id: string): ToolbarItem | undefined {
   return ALL_ITEMS.find((t) => t.id === id)
@@ -138,6 +148,7 @@ export function autoName(doc: Doc, base: string): string {
 }
 
 export function createPart(doc: Doc, item: ToolbarItem): Part {
+  const hardware = item.role === 'hardware' ? HARDWARE.find((h) => h.id === item.id) : undefined
   return {
     id: crypto.randomUUID(),
     name: autoName(doc, item.label),
@@ -147,7 +158,8 @@ export function createPart(doc: Doc, item: ToolbarItem): Part {
     dims: item.dims(doc.units),
     position: [0, 0, 0], // caller places it (store.addPart)
     rotation: item.rotation ? [...item.rotation] : [0, 0, 0],
-    color: item.role === 'hole' ? HOLE_COLOR : nextColor(),
+    color: hardware ? hardware.color : item.role === 'hole' ? HOLE_COLOR : nextColor(),
+    ...(hardware ? { catalogId: hardware.id } : {}),
   }
 }
 

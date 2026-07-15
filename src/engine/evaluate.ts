@@ -10,6 +10,7 @@
 
 import type { Manifold, ManifoldToplevel } from 'manifold-3d'
 import type { Doc, Part, Role } from '../model/types'
+import { hardwareDef, type PrimSpec } from '../model/hardware'
 import { kernel } from './kernel'
 
 export interface EvalPart {
@@ -79,6 +80,11 @@ function buildPrimitive(m: ManifoldToplevel, part: Part, scratch: Scratch): Mani
       profile.delete()
       return scratch.keep(solid.translate([0, 0, -d.width / 2]))
     }
+    case 'hardware': {
+      const def = hardwareDef(part.catalogId)
+      if (!def) return scratch.keep(m.Manifold.cube([10, 10, 10], true))
+      return specsManifold(m, def.visual(part.dims), scratch)
+    }
     case 'slot': {
       // Capsule: length along X, rounded ends of `width` diameter, cut `deep`.
       // Build the pill profile in XY, extrude +Z for depth, stand up so depth
@@ -104,6 +110,35 @@ function buildPrimitive(m: ManifoldToplevel, part: Part, scratch: Scratch): Mani
   }
 }
 
+/** Rotate (Euler XYZ, R = Rx·Ry·Rz) then translate — see partManifold. */
+function placed(
+  mf: Manifold,
+  rotation: [number, number, number],
+  position: [number, number, number],
+  scratch: Scratch,
+): Manifold {
+  const [rx, ry, rz] = rotation
+  let out = mf
+  if (rz !== 0) out = scratch.keep(out.rotate([0, 0, rz]))
+  if (ry !== 0) out = scratch.keep(out.rotate([0, ry, 0]))
+  if (rx !== 0) out = scratch.keep(out.rotate([rx, 0, 0]))
+  return scratch.keep(out.translate(position))
+}
+
+/** Union a list of declarative primitive specs in the entry's local frame. */
+function specsManifold(m: ManifoldToplevel, specs: PrimSpec[], scratch: Scratch): Manifold {
+  const parts = specs.map((s) => {
+    const prim = buildPrimitive(
+      m,
+      { kind: s.kind, dims: s.dims } as Part,
+      scratch,
+    )
+    return placed(prim, s.rotation ?? [0, 0, 0], s.position, scratch)
+  })
+  if (parts.length === 1) return parts[0]
+  return scratch.keep(m.Manifold.union(parts))
+}
+
 /**
  * The part placed in the world: rotated about its local-bbox center, then
  * translated so that center sits at part.position.
@@ -111,12 +146,27 @@ function buildPrimitive(m: ManifoldToplevel, part: Part, scratch: Scratch): Mani
  * three.js Euler 'XYZ' — keep these two in lockstep.
  */
 function partManifold(m: ManifoldToplevel, part: Part, scratch: Scratch): Manifold {
-  let mf = buildPrimitive(m, part, scratch)
-  const [rx, ry, rz] = part.rotation
-  if (rz !== 0) mf = scratch.keep(mf.rotate([0, 0, rz]))
-  if (ry !== 0) mf = scratch.keep(mf.rotate([0, ry, 0]))
-  if (rx !== 0) mf = scratch.keep(mf.rotate([rx, 0, 0]))
-  return scratch.keep(mf.translate(part.position))
+  const mf = buildPrimitive(m, part, scratch)
+  return placed(mf, part.rotation, part.position, scratch)
+}
+
+/**
+ * Everything that cuts wood: hand-placed holes plus every hardware item's
+ * bores (a cup hinge IS its 35mm bore), all in world space.
+ */
+function cutterManifolds(m: ManifoldToplevel, doc: Doc, scratch: Scratch): Manifold[] {
+  const out: Manifold[] = []
+  for (const p of doc.parts) {
+    if (p.role === 'hole') {
+      out.push(partManifold(m, p, scratch))
+    } else if (p.kind === 'hardware') {
+      const def = hardwareDef(p.catalogId)
+      if (!def) continue
+      const local = specsManifold(m, def.cutters(p.dims), scratch)
+      out.push(placed(local, p.rotation, p.position, scratch))
+    }
+  }
+  return out
 }
 
 function toPositions(mf: Manifold): Float32Array {
@@ -155,14 +205,13 @@ export function evaluateScene(doc: Doc): EvalResult {
   const emptySolids: string[] = []
   const idleHoles: string[] = []
   try {
-    const holes = doc.parts.filter((p) => p.role === 'hole')
-    const holeMfs = holes.map((p) => partManifold(m, p, scratch))
+    const cutters = cutterManifolds(m, doc, scratch)
     const holesUnion =
-      holeMfs.length === 0
+      cutters.length === 0
         ? null
-        : holeMfs.length === 1
-          ? holeMfs[0]
-          : scratch.keep(m.Manifold.union(holeMfs))
+        : cutters.length === 1
+          ? cutters[0]
+          : scratch.keep(m.Manifold.union(cutters))
 
     const solidRecords: { id: string; mf: Manifold; bbox: EvalPart['bbox']; cutVolume: number }[] = []
 
@@ -181,18 +230,20 @@ export function evaluateScene(doc: Doc): EvalResult {
     }
 
     // A hole is idle when it removes no material from any solid.
-    for (let h = 0; h < holes.length; h++) {
-      const hb = toBBox(holeMfs[h])
+    const holes = doc.parts.filter((p) => p.role === 'hole')
+    for (const hole of holes) {
+      const hMf = partManifold(m, hole, scratch)
+      const hb = toBBox(hMf)
       let cuts = false
       for (const s of solidRecords) {
         if (!bboxesOverlap(hb, s.bbox)) continue
-        const inter = scratch.keep(m.Manifold.intersection(s.mf, holeMfs[h]))
+        const inter = scratch.keep(m.Manifold.intersection(s.mf, hMf))
         if (inter.volume() > 1) {
           cuts = true
           break
         }
       }
-      if (!cuts) idleHoles.push(holes[h].id)
+      if (!cuts) idleHoles.push(hole.id)
     }
 
     // Overlap guard: two solids whose material genuinely intersects.
@@ -243,16 +294,17 @@ export function evaluateExport(doc: Doc): { positions: Float32Array } {
 }
 
 function combinedManifold(m: ManifoldToplevel, doc: Doc, scratch: Scratch): Manifold {
+  // hardware visuals never union into the wood — they're bought, not made;
+  // their BORES cut like any hole (via cutterManifolds)
   const solids = doc.parts.filter((p) => p.role === 'solid')
   if (solids.length === 0) throw new Error('There is nothing solid to export yet.')
   const solidMfs = solids.map((p) => partManifold(m, p, scratch))
   let combined =
     solidMfs.length === 1 ? solidMfs[0] : scratch.keep(m.Manifold.union(solidMfs))
-  const holes = doc.parts.filter((p) => p.role === 'hole')
-  if (holes.length > 0) {
-    const holeMfs = holes.map((p) => partManifold(m, p, scratch))
+  const cutters = cutterManifolds(m, doc, scratch)
+  if (cutters.length > 0) {
     const holesUnion =
-      holeMfs.length === 1 ? holeMfs[0] : scratch.keep(m.Manifold.union(holeMfs))
+      cutters.length === 1 ? cutters[0] : scratch.keep(m.Manifold.union(cutters))
     combined = scratch.keep(m.Manifold.difference(combined, holesUnion))
   }
   if (combined.isEmpty()) throw new Error('The holes cut away everything — nothing left to export.')
@@ -273,11 +325,10 @@ export function topOutline(doc: Doc, partId?: string): [number, number][][] {
       const part = doc.parts.find((p) => p.id === partId)
       if (!part) throw new Error('Part not found')
       const raw = partManifold(m, part, scratch)
-      const holes = doc.parts.filter((p) => p.role === 'hole')
-      if (part.role === 'solid' && holes.length > 0) {
-        const holeMfs = holes.map((p) => partManifold(m, p, scratch))
+      const cutters = part.role === 'solid' ? cutterManifolds(m, doc, scratch) : []
+      if (cutters.length > 0) {
         const holesUnion =
-          holeMfs.length === 1 ? holeMfs[0] : scratch.keep(m.Manifold.union(holeMfs))
+          cutters.length === 1 ? cutters[0] : scratch.keep(m.Manifold.union(cutters))
         body = scratch.keep(m.Manifold.difference(raw, holesUnion))
       } else {
         body = raw

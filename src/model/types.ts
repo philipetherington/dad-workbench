@@ -10,8 +10,8 @@
 //     i.e. the rotation matrix is R = Rx · Ry · Rz.
 
 export type UnitSystem = 'in' | 'mm'
-export type Role = 'solid' | 'hole'
-export type ShapeKind = 'board' | 'cylinder' | 'sphere' | 'cone' | 'wedge' | 'slot'
+export type Role = 'solid' | 'hole' | 'hardware'
+export type ShapeKind = 'board' | 'cylinder' | 'sphere' | 'cone' | 'wedge' | 'slot' | 'hardware'
 
 export interface Part {
   id: string
@@ -20,7 +20,10 @@ export interface Part {
   role: Role
   /** Toolbar item this was created from ('board', 'dowel', 'block', 'round-hole', ...). Drives naming and label wording only. */
   variant?: string
-  /** Dimensions in mm. Keys per kind are defined by DIM_SPECS. */
+  /**
+   * Dimensions in mm. Keys per kind are defined by DIM_SPECS; for hardware
+   * (kind 'hardware') the keys are the catalog entry's param specs.
+   */
   dims: Record<string, number>
   /** Center of local bounding box, world mm, y-up. */
   position: [number, number, number]
@@ -32,6 +35,13 @@ export interface Part {
   locked?: boolean
   /** Parts glued together share a glueId; they select and move as one. */
   glueId?: string
+  /**
+   * A cut or hardware item can belong to a host board: it moves and turns
+   * with the host (host -> child only, never the reverse), and dies with it.
+   */
+  hostId?: string
+  /** Which hardware catalog entry this part is (kind === 'hardware' only). */
+  catalogId?: string
 }
 
 export interface Glue {
@@ -53,8 +63,10 @@ export interface DimSpec {
   key: string
   /** Plain-language label shown in the inspector. */
   label: string
-  /** Minimum value in mm. */
+  /** Minimum value in mm (or in units of the param, when integer). */
   min: number
+  /** A plain count, not a length — no unit conversion, whole numbers only. */
+  integer?: boolean
   /**
    * Local axis this dimension stretches along (0=x, 1=y, 2=z), when it maps
    * directly to a bounding-box side. Radial dims (diameter) omit it.
@@ -91,6 +103,28 @@ export const DIM_SPECS: Record<ShapeKind, DimSpec[]> = {
     { key: 'width', label: 'Width', min: 0.5, axis: 2 },
     { key: 'deep', label: 'Deep', min: 0.5, axis: 1 },
   ],
+  // hardware params come from the catalog entry — see dimSpecsFor()
+  hardware: [],
+}
+
+/**
+ * The hardware catalog (model/hardware.ts) registers itself here at module
+ * load, so types.ts can answer size/spec questions for hardware parts without
+ * importing the catalog (which imports this file).
+ */
+export interface HardwareHooks {
+  dimSpecs(catalogId: string): DimSpec[]
+  localSize(catalogId: string, dims: Record<string, number>): [number, number, number]
+}
+let hardwareHooks: HardwareHooks | null = null
+export function registerHardwareHooks(h: HardwareHooks): void {
+  hardwareHooks = h
+}
+
+/** The dimension specs for a part, wherever they live. */
+export function dimSpecsFor(part: Pick<Part, 'kind' | 'catalogId'>): DimSpec[] {
+  if (part.kind === 'hardware') return hardwareHooks?.dimSpecs(part.catalogId ?? '') ?? []
+  return DIM_SPECS[part.kind]
 }
 
 /**
@@ -101,7 +135,7 @@ export function dimLabel(part: Part, key: string): string {
   if (part.role === 'hole') {
     if (key === 'height' || key === 'thickness') return 'Deep'
   }
-  const spec = DIM_SPECS[part.kind].find((s) => s.key === key)
+  const spec = dimSpecsFor(part).find((s) => s.key === key)
   return spec ? spec.label : key
 }
 
@@ -128,6 +162,8 @@ export function localSize(part: Part): [number, number, number] {
       // the engine clamps a slot's width to its length (a wider-than-long
       // slot is just a circle of diameter = length)
       return [d.length, d.deep, Math.min(d.width, d.length)]
+    case 'hardware':
+      return hardwareHooks?.localSize(part.catalogId ?? '', d) ?? [10, 10, 10]
   }
 }
 
@@ -190,9 +226,14 @@ export function worldBottomOffset(part: Part): number {
   }
 }
 
-export function clampDims(kind: ShapeKind, dims: Record<string, number>): Record<string, number> {
+export function clampDims(
+  kind: ShapeKind,
+  dims: Record<string, number>,
+  catalogId?: string,
+): Record<string, number> {
   const out: Record<string, number> = { ...dims }
-  for (const spec of DIM_SPECS[kind]) {
+  const specs = kind === 'hardware' ? dimSpecsFor({ kind, catalogId }) : DIM_SPECS[kind]
+  for (const spec of specs) {
     const v = out[spec.key]
     if (!Number.isFinite(v) || v < spec.min) out[spec.key] = spec.min
     else if (v > MAX_DIM_MM) out[spec.key] = MAX_DIM_MM

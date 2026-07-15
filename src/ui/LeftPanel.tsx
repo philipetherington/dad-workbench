@@ -1,16 +1,16 @@
 // Left panel: ADD A PIECE · CUT A HOLE · YOUR PIECES (the cut list forming).
 
 import type { Part } from '../model/types'
-import { DIM_SPECS } from '../model/types'
+import { dimSpecsFor } from '../model/types'
 import { formatLengthBare } from '../model/units'
-import { SOLID_ITEMS, HOLE_ITEMS } from '../model/parts'
+import { SOLID_ITEMS, HOLE_ITEMS, HARDWARE_ITEMS } from '../model/parts'
 import { useStore } from '../model/store'
 import { useBus } from '../viewport/bus'
 import { ShapeIcon, EyeIcon, PinIcon } from './Icons'
 
 function dimSummary(part: Part, units: 'in' | 'mm'): string {
-  return DIM_SPECS[part.kind]
-    .map((s) => formatLengthBare(part.dims[s.key], units))
+  return dimSpecsFor(part)
+    .map((s) => (s.integer ? `${Math.round(part.dims[s.key])}` : formatLengthBare(part.dims[s.key], units)))
     .join(' × ')
 }
 
@@ -41,7 +41,7 @@ function PieceRow({ part }: { part: Part }) {
       />
       <span
         className={`swatch${part.role === 'hole' ? ' hole' : ''}`}
-        style={part.role === 'solid' ? { background: part.color } : undefined}
+        style={part.role !== 'hole' ? { background: part.color } : undefined}
       />
       <span className="name">
         {part.name}
@@ -71,7 +71,7 @@ export function LeftPanel() {
   const setShowCutouts = useBus((s) => s.setShowCutouts)
   const result = useBus((s) => s.result)
 
-  const solids = doc.parts.filter((p) => p.role === 'solid')
+  const solids = doc.parts.filter((p) => p.role !== 'hole')
   const holes = doc.parts.filter((p) => p.role === 'hole')
   const idleHoles = new Set(result?.idleHoles ?? [])
 
@@ -99,6 +99,16 @@ export function LeftPanel() {
               addPart(item)
             }}
           >
+            <ShapeIcon id={item.id} />
+            {item.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="wb-section-title">HARDWARE</div>
+      <div className="wb-shape-grid">
+        {HARDWARE_ITEMS.map((item) => (
+          <button key={item.id} className="wb-shape-btn" onClick={() => addPart(item)}>
             <ShapeIcon id={item.id} />
             {item.label}
           </button>

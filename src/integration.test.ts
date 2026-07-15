@@ -165,6 +165,64 @@ describe('re-seating math', () => {
   })
 })
 
+describe('hardware pipeline', () => {
+  function boardWithPinRow(): Doc {
+    return {
+      version: 1, name: 'hw', units: 'mm', snapStep: 1, glues: [],
+      parts: [
+        {
+          id: 'b', name: 'Side', kind: 'board', role: 'solid',
+          dims: { length: 300, width: 100, thickness: 18 },
+          position: [0, 9, 0], rotation: [0, 0, 0], color: '#fff',
+        },
+        {
+          id: 'hw', name: 'Shelf Pin Row 1', kind: 'hardware', role: 'hardware',
+          catalogId: 'shelf-pin-row',
+          dims: { count: 4, spacing: 32, diameter: 5, deep: 12 },
+          // cutters extend downward from the item's origin into the board top
+          position: [0, 18, 0], rotation: [0, 0, 0], color: '#b8926a', hostId: 'b',
+        },
+      ],
+    }
+  }
+
+  it('hardware bores cut the board it sits on', () => {
+    const doc = boardWithPinRow()
+    const result = evaluateScene(doc)
+    expect(result.error).toBeNull()
+    const board = result.parts.find((p) => p.id === 'b')!
+    const plain = evaluateScene({ ...doc, parts: [doc.parts[0]] }).parts[0]
+    // the bored board has more triangles than the plain one (hole walls)
+    expect(board.positions.length).toBeGreaterThan(plain.positions.length)
+    // and the hardware renders as its own part
+    expect(result.parts.find((p) => p.id === 'hw')?.role).toBe('hardware')
+  })
+
+  it('hardware bores reach STL, and bodies stay out of it', () => {
+    const doc = boardWithPinRow()
+    const { positions } = evaluateExport(doc)
+    // z-up export: nothing above the 18mm board — the witness rail is not exported
+    let maxZ = -Infinity
+    for (let i = 0; i < positions.length; i += 3) maxZ = Math.max(maxZ, positions[i + 2])
+    expect(maxZ).toBeLessThanOrEqual(18.01)
+  })
+
+  it('OpenSCAD gets the bores as hole modules', () => {
+    const scad = exportSCAD(boardWithPinRow())
+    expect(scad).toContain('difference()')
+    expect(scad).toContain('bores only')
+    // four pin cylinders
+    expect((scad.match(/cylinder\(h = 12/g) ?? []).length).toBe(4)
+  })
+
+  it('rejects hardware with an unknown catalog id', async () => {
+    const { deserializeDoc, serializeDoc } = await import('./model/store')
+    const doc = boardWithPinRow()
+    doc.parts[1].catalogId = 'not-a-thing'
+    expect(deserializeDoc(serializeDoc(doc))).toBeNull()
+  })
+})
+
 describe('document validation', () => {
   it('rejects structurally broken docs instead of installing them', async () => {
     const { deserializeDoc } = await import('./model/store')

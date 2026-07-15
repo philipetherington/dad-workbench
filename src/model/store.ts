@@ -12,6 +12,7 @@ import type { Doc, Part } from './types'
 import { clampDims, DIM_SPECS, worldBottomOffset, worldSize } from './types'
 import type { ToolbarItem } from './parts'
 import { createPart, emptyDoc } from './parts'
+import { hardwareDef } from './hardware'
 import { DEFAULT_SNAP } from './units'
 
 /** Glued parts always select together — expand ids to whole glue sets. */
@@ -61,6 +62,7 @@ export interface WBState {
   updatePartDims: (id: string, dims: Record<string, number>) => void
   updateParts: (ids: string[], fn: (p: Part) => void, opts?: { history?: boolean }) => void
   deleteSelection: () => void
+  attachPart: (childId: string, hostId: string | null) => void
   duplicateSelection: () => void
   glueSelection: () => void
   unglue: (glueId: string | string[]) => void
@@ -165,7 +167,7 @@ export const useStore = create<WBState>((set, get) => ({
       // (parts grow up, not down through the bench) — in world space, so a
       // lying dowel whose diameter grows also stays on the bench.
       const oldBottom = p.position[1] - worldBottomOffset(p)
-      p.dims = clampDims(p.kind, { ...p.dims, ...dims })
+      p.dims = clampDims(p.kind, { ...p.dims, ...dims }, p.catalogId)
       p.position[1] = oldBottom + worldBottomOffset(p)
     })
   },
@@ -180,10 +182,31 @@ export const useStore = create<WBState>((set, get) => ({
     const s = get()
     if (s.selection.length === 0) return
     get().mutate((d) => {
-      d.parts = d.parts.filter((p) => !s.selection.includes(p.id))
+      // a board's attached cuts and hardware die with it (one undo step)
+      const doomed = new Set(withAttached(d, s.selection))
+      d.parts = d.parts.filter((p) => !doomed.has(p.id))
       d.glues = d.glues.filter((g) => d.parts.some((p) => p.glueId === g.id))
+      // an orphaned attachment (host gone, child survived) detaches quietly
+      const alive = new Set(d.parts.map((p) => p.id))
+      for (const p of d.parts) if (p.hostId && !alive.has(p.hostId)) delete p.hostId
     })
     set({ selection: [] })
+  },
+
+  attachPart: (childId: string, hostId: string | null) => {
+    get().mutate((d) => {
+      const child = d.parts.find((p) => p.id === childId)
+      if (!child) return
+      if (hostId === null) {
+        delete child.hostId
+        return
+      }
+      const host = d.parts.find((p) => p.id === hostId)
+      // hosts are solids only, and never a descendant of the child (no cycles)
+      if (!host || host.role !== 'solid') return
+      if (withAttached(d, [childId]).includes(hostId)) return
+      child.hostId = hostId
+    }, { history: false })
   },
 
   duplicateSelection: () => {
@@ -192,13 +215,18 @@ export const useStore = create<WBState>((set, get) => ({
     const offset = Math.max(s.doc.snapStep * 4, 20)
     const newIds: string[] = []
     get().mutate((d) => {
-      // copies of glued parts get their own fresh glue, never the original's
+      // copies of glued parts get their own fresh glue, never the original's;
+      // attachments are remapped within the copied set (copy a board, its
+      // hinge copies come along attached to the NEW board)
       const glueMap = new Map<string, string>()
+      const idMap = new Map<string, string>()
+      const toCopy = withAttached(d, s.selection)
       const copies = d.parts
-        .filter((p) => s.selection.includes(p.id))
+        .filter((p) => toCopy.includes(p.id))
         .map((p) => {
           const c: Part = JSON.parse(JSON.stringify(p))
           c.id = crypto.randomUUID()
+          idMap.set(p.id, c.id)
           c.name = `${p.name} copy`
           c.position = [p.position[0] + offset, p.position[1], p.position[2] + offset]
           if (c.glueId) {
@@ -213,6 +241,10 @@ export const useStore = create<WBState>((set, get) => ({
           newIds.push(c.id)
           return c
         })
+      // point copied attachments at the copied hosts
+      for (const c of copies) {
+        if (c.hostId) c.hostId = idMap.get(c.hostId) ?? c.hostId
+      }
       d.parts.push(...copies)
     })
     set({ selection: newIds })
@@ -388,7 +420,23 @@ export function serializeDoc(doc: Doc): string {
   return JSON.stringify(doc, null, 2)
 }
 
-const VALID_ROLES = new Set(['solid', 'hole'])
+const VALID_ROLES = new Set(['solid', 'hole', 'hardware'])
+
+/** ids plus every part attached to them, transitively (host -> children). */
+export function withAttached(doc: Doc, ids: string[]): string[] {
+  const out = new Set(ids)
+  let grew = true
+  while (grew) {
+    grew = false
+    for (const p of doc.parts) {
+      if (p.hostId && out.has(p.hostId) && !out.has(p.id)) {
+        out.add(p.id)
+        grew = true
+      }
+    }
+  }
+  return [...out]
+}
 
 function isVec3(v: unknown): v is [number, number, number] {
   return Array.isArray(v) && v.length === 3 && v.every((n) => Number.isFinite(n))
@@ -416,8 +464,19 @@ export function deserializeDoc(json: string): Doc | null {
       ) {
         return null
       }
-      p.dims = clampDims(p.kind, p.dims)
+      // hardware must reference a catalog entry we actually have
+      if ((p.kind === 'hardware') !== (p.role === 'hardware')) return null
+      if (p.kind === 'hardware' && !hardwareDef(p.catalogId)) return null
+      p.dims = clampDims(p.kind, p.dims, p.catalogId)
       if (typeof p.color !== 'string') p.color = '#c9a06a'
+    }
+    // attachments must point at existing solids; anything else detaches
+    const byId = new Map<string, Part>(d.parts.map((p: Part) => [p.id, p]))
+    for (const p of d.parts) {
+      if (p.hostId !== undefined) {
+        const host = byId.get(p.hostId)
+        if (typeof p.hostId !== 'string' || !host || host.role !== 'solid') delete p.hostId
+      }
     }
     d.units = d.units === 'in' || d.units === 'mm' ? d.units : 'mm'
     d.snapStep = Number.isFinite(d.snapStep) && d.snapStep > 0 ? d.snapStep : DEFAULT_SNAP[d.units as 'in' | 'mm']

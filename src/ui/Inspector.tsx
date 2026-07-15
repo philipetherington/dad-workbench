@@ -2,13 +2,20 @@
 // a project summary when none. One flat column — nothing collapses.
 
 import type { Part } from '../model/types'
-import { DIM_SPECS, dimLabel, worldSize } from '../model/types'
+import { dimLabel, dimSpecsFor, worldSize } from '../model/types'
 import { IN, formatLength } from '../model/units'
-import { useStore } from '../model/store'
+import { useStore, withAttached } from '../model/store'
 import type { LineUpMode } from '../model/store'
 import { useBus } from '../viewport/bus'
-import { applyFlip, applyPosture, applyRotation, POSTURES, turnAxis } from '../model/rotate'
+import {
+  applyFlip,
+  applyPostureToGroup,
+  applyRotationToGroup,
+  POSTURES,
+  turnAxis,
+} from '../model/rotate'
 import { DimField } from './DimField'
+import { autoAttach } from './attach'
 import {
   ArrowIcon,
   FlipIcon,
@@ -163,10 +170,21 @@ function SinglePanel({ part }: { part: Part }) {
 
   const updateThis = (fn: (p: Part) => void) => store.getState().updateParts([part.id], fn)
 
+  /** Rotate this piece AND whatever is attached to it, as one rigid body. */
+  const withGroup = (fn: (host: Part, children: Part[]) => void) => {
+    store.getState().mutate((d) => {
+      const host = d.parts.find((q) => q.id === part.id)
+      if (!host) return
+      const kidIds = withAttached(d, [host.id]).filter((i) => i !== host.id)
+      const children = d.parts.filter((q) => kidIds.includes(q.id))
+      fn(host, children)
+    })
+  }
+
   const turn = (kind: 'turn' | 'tip' | 'tilt', degrees: number) => {
     const yaw = camera?.yawDeg() ?? 0
     const axis = turnAxis(kind, yaw)
-    updateThis((p) => applyRotation(p, axis, degrees))
+    withGroup((host, children) => applyRotationToGroup(host, children, axis, degrees))
   }
 
   const removeThis = () => {
@@ -192,30 +210,50 @@ function SinglePanel({ part }: { part: Part }) {
         spellCheck={false}
       />
 
-      <div className="wb-role-switch">
-        <button
-          className={`wb-role-card solid${part.role === 'solid' ? ' on' : ''}`}
-          onClick={() => updateThis((p) => (p.role = 'solid'))}
-        >
-          Solid wood
-          <span className="sub">a piece you keep</span>
-        </button>
-        <button
-          className={`wb-role-card hole${part.role === 'hole' ? ' on' : ''}`}
-          onClick={() => {
-            if (part.role !== 'hole' && !localStorage.getItem('workbench-hole-explained')) {
-              localStorage.setItem('workbench-hole-explained', '1')
-              useBus
-                .getState()
-                .toast('This piece now cuts wood away wherever it touches another piece.')
-            }
-            updateThis((p) => (p.role = 'hole'))
-          }}
-        >
-          Cuts wood away
-          <span className="sub">a hole or notch</span>
-        </button>
-      </div>
+      {part.role !== 'hardware' && (
+        <div className="wb-role-switch">
+          <button
+            className={`wb-role-card solid${part.role === 'solid' ? ' on' : ''}`}
+            onClick={() => updateThis((p) => (p.role = 'solid'))}
+          >
+            Solid wood
+            <span className="sub">a piece you keep</span>
+          </button>
+          <button
+            className={`wb-role-card hole${part.role === 'hole' ? ' on' : ''}`}
+            onClick={() => {
+              if (part.role !== 'hole' && !localStorage.getItem('workbench-hole-explained')) {
+                localStorage.setItem('workbench-hole-explained', '1')
+                useBus
+                  .getState()
+                  .toast('This piece now cuts wood away wherever it touches another piece.')
+              }
+              updateThis((p) => (p.role = 'hole'))
+            }}
+          >
+            Cuts wood away
+            <span className="sub">a hole or notch</span>
+          </button>
+        </div>
+      )}
+      {part.role === 'hardware' && (
+        <div className="wb-note">
+          Hardware you buy — it bores its own holes in the wood it sits on, and joins the
+          shopping list.
+        </div>
+      )}
+
+      {part.hostId && (
+        <div className="wb-note">
+          Attached to <strong>{doc.parts.find((p) => p.id === part.hostId)?.name ?? 'a piece'}</strong>{' '}
+          — it moves and turns with it.
+          <div style={{ marginTop: 8 }}>
+            <button className="wb-btn small" onClick={() => store.getState().attachPart(part.id, null)}>
+              Let it move on its own
+            </button>
+          </div>
+        </div>
+      )}
 
       {cutAway && (
         <div className="wb-note bad">
@@ -236,17 +274,46 @@ function SinglePanel({ part }: { part: Part }) {
 
       <div className="wb-group">
         <div className="wb-field-label">MEASUREMENTS</div>
-        {DIM_SPECS[part.kind].map((spec) => (
-          <DimField
-            key={spec.key}
-            label={dimLabel(part, spec.key)}
-            mm={part.dims[spec.key]}
-            units={doc.units}
-            step={doc.snapStep}
-            min={spec.min}
-            onCommit={(mm) => store.getState().updatePartDims(part.id, { [spec.key]: mm })}
-          />
-        ))}
+        {dimSpecsFor(part).map((spec) =>
+          spec.integer ? (
+            <div key={spec.key}>
+              <div className="wb-field-label">{spec.label}</div>
+              <div className="wb-dim-row">
+                <button
+                  className="wb-stepper"
+                  onClick={() =>
+                    store
+                      .getState()
+                      .updatePartDims(part.id, { [spec.key]: Math.max(spec.min, part.dims[spec.key] - 1) })
+                  }
+                >
+                  −
+                </button>
+                <div className="wb-dim-input" style={{ lineHeight: '32px' }}>
+                  {Math.round(part.dims[spec.key])}
+                </div>
+                <button
+                  className="wb-stepper"
+                  onClick={() =>
+                    store.getState().updatePartDims(part.id, { [spec.key]: part.dims[spec.key] + 1 })
+                  }
+                >
+                  +
+                </button>
+              </div>
+            </div>
+          ) : (
+            <DimField
+              key={spec.key}
+              label={dimLabel(part, spec.key)}
+              mm={part.dims[spec.key]}
+              units={doc.units}
+              step={doc.snapStep}
+              min={spec.min}
+              onCommit={(mm) => store.getState().updatePartDims(part.id, { [spec.key]: mm })}
+            />
+          ),
+        )}
         {part.kind === 'board' && part.role === 'solid' && doc.units === 'in' && (
           <div className="wb-chip-row">
             {THICKNESS_PRESETS.map((p) => (
@@ -290,7 +357,9 @@ function SinglePanel({ part }: { part: Part }) {
                 key={p.key}
                 className="wb-btn small"
                 style={{ flexDirection: 'column', gap: 2, minHeight: 62 }}
-                onClick={() => updateThis((q) => applyPosture(q, p.rotation))}
+                onClick={() =>
+                  withGroup((host, children) => applyPostureToGroup(host, children, p.rotation))
+                }
               >
                 <PostureIcon posture={p.key as 'flat' | 'edge' | 'standing'} />
                 {p.label}
@@ -413,6 +482,8 @@ function nudge(part: Part, dx: number, dy: number, dz: number) {
       p.position[2] + dz * step,
     ]
   })
+  // after the engine re-evaluates, settle where this piece now belongs
+  window.setTimeout(() => autoAttach([part.id]), 150)
 }
 
 export function Inspector() {

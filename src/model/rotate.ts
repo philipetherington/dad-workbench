@@ -57,6 +57,29 @@ export function applyRotation(part: Part, axis: THREE.Vector3, degrees: number):
   }
 }
 
+/**
+ * Rotate a host and everything attached to it as one rigid body: children's
+ * positions swing about the host's center, and their own orientations
+ * compose the same world rotation.
+ */
+export function applyRotationToGroup(
+  host: Part,
+  children: Part[],
+  axis: THREE.Vector3,
+  degrees: number,
+): void {
+  const center = new THREE.Vector3(...host.position)
+  const q = new THREE.Quaternion().setFromAxisAngle(axis.clone().normalize(), (degrees * Math.PI) / 180)
+  applyRotation(host, axis, degrees)
+  // children follow the host's actual vertical correction from its re-seat
+  const lift = host.position[1] - center.y
+  for (const c of children) {
+    const p = new THREE.Vector3(...c.position).sub(center).applyQuaternion(q).add(center)
+    c.position = [p.x, p.y + lift, p.z]
+    c.rotation = rotated(c.rotation, axis, degrees)
+  }
+}
+
 /** Posture presets for boards: one click, always a known-good orientation. */
 export const POSTURES: { key: string; label: string; rotation: [number, number, number] }[] = [
   { key: 'flat', label: 'Lying Flat', rotation: [0, 0, 0] },
@@ -67,6 +90,29 @@ export const POSTURES: { key: string; label: string; rotation: [number, number, 
 export function applyPosture(part: Part, rotation: [number, number, number]): void {
   part.rotation = [...rotation]
   part.position = [part.position[0], worldBottomOffset(part), part.position[2]]
+}
+
+/** Posture for a host with attached parts: children swing through the same delta. */
+export function applyPostureToGroup(
+  host: Part,
+  children: Part[],
+  target: [number, number, number],
+): void {
+  const toQ = (r: [number, number, number]) =>
+    new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(...(r.map((d) => (d * Math.PI) / 180) as [number, number, number]), 'XYZ'),
+    )
+  const qDelta = toQ(target).multiply(toQ(host.rotation).invert())
+  const angle = 2 * Math.acos(Math.min(1, Math.abs(qDelta.w)))
+  if (angle < 1e-6 || children.length === 0) {
+    applyPosture(host, target)
+    return
+  }
+  const axis = new THREE.Vector3(qDelta.x, qDelta.y, qDelta.z).normalize()
+  const sign = qDelta.w < 0 ? -1 : 1
+  applyRotationToGroup(host, children, axis, (sign * angle * 180) / Math.PI)
+  // group rotation lands on the same orientation, but pin it exactly
+  host.rotation = [...target]
 }
 
 /** Mirror the part left-right (for making the matching pair of a bracket). */

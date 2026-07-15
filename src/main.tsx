@@ -61,6 +61,12 @@ if (doc) {
   writeAutosave()
 }
 
+// dev-only debugging handle: the REAL store instances (console imports of
+// module URLs create duplicates and mislead)
+if (import.meta.env.DEV) {
+  ;(window as unknown as Record<string, unknown>).__wb = { useBus, useStore }
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

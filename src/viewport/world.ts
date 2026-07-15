@@ -10,7 +10,8 @@ import * as THREE from 'three'
 import type { Doc, Part } from '../model/types'
 import { DIM_SPECS, clampDims, localSize, worldBottomOffset } from '../model/types'
 import { formatLength, snap } from '../model/units'
-import { useStore } from '../model/store'
+import { useStore, withAttached } from '../model/store'
+import { autoAttach } from '../ui/attach'
 import { evaluateScene } from '../engine/evaluate'
 import { positionsToGeometry } from '../engine/toThree'
 import { kernelReady } from '../engine/kernel'
@@ -290,11 +291,13 @@ export class World {
                 depthWrite: false,
                 side: THREE.DoubleSide,
               })
-            : new THREE.MeshStandardMaterial({
-                roughness: 0.75,
-                metalness: 0.02,
-                wireframe: useBus.getState().wireframe,
-              })
+            : part.role === 'hardware'
+              ? new THREE.MeshStandardMaterial({ roughness: 0.35, metalness: 0.75 })
+              : new THREE.MeshStandardMaterial({
+                  roughness: 0.75,
+                  metalness: 0.02,
+                  wireframe: useBus.getState().wireframe,
+                })
         const mesh = new THREE.Mesh(new THREE.BufferGeometry(), mat)
         mesh.userData.partId = p.id
         vis = { mesh, edges: null, wire: null }
@@ -740,9 +743,9 @@ export class World {
       this.drag = null
       return
     }
-    let ids = store.selection.includes(partId) ? [...store.selection] : [partId]
     if (!store.selection.includes(partId)) store.select([partId])
-    ids = useStore.getState().selection.filter(
+    // a host drags its attached cuts and hardware along with it
+    const ids = withAttached(doc, useStore.getState().selection).filter(
       (id) => !doc.parts.find((p) => p.id === id)?.locked,
     )
     const bbox = this.visuals.get(partId)?.mesh.userData.bbox as
@@ -1048,6 +1051,10 @@ export class World {
       if (!drag.moved) store.clearSelection()
       return
     }
+
+    // moving a cut or hardware item onto a board attaches it (and dragging it
+    // clear detaches) — folded into the same undo step as the move itself
+    if (drag.kind === 'move') autoAttach(drag.ids)
 
     // move / resize / lift commit one undo step
     store.endDrag()
