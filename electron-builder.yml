@@ -5,8 +5,8 @@
 # account — scripts/build-mac.sh applies an ad-hoc signature afterwards so
 # arm64 macOS will actually launch the binary.
 
-appId: com.philipetherington.workbench
-productName: Workbench
+appId: com.philipetherington.dadworkbench
+productName: DAD Workbench
 copyright: (c) 2026 Philip Etherington
 
 directories:
@@ -39,13 +39,13 @@ mac:
     NSHumanReadableCopyright: (c) 2026 Philip Etherington
   fileAssociations:
     - ext: workbench
-      name: Workbench Project
+      name: DAD Workbench Project
       role: Editor
       rank: Owner
       icon: build/document.icns
 
 dmg:
-  title: Workbench
+  title: DAD Workbench
   window:
     width: 560
     height: 380

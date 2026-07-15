@@ -1,4 +1,4 @@
-# Workbench — Setting It Up
+# DAD DAD Workbench — Setting It Up
 
 A design program for the workshop. This page gets it onto your Mac.
 You only have to do this once.

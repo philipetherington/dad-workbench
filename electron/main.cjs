@@ -20,7 +20,7 @@ let pendingOpenPath = null
 /** @type {BrowserWindow | null} */
 let mainWindow = null
 
-const PROJECT_FILTERS = [{ name: 'Workbench Project', extensions: ['workbench', 'json'] }]
+const PROJECT_FILTERS = [{ name: 'DAD Workbench Project', extensions: ['workbench', 'json'] }]
 
 // ---------------------------------------------------------------- window
 
@@ -31,7 +31,7 @@ function createWindow() {
     minWidth: 1080,
     minHeight: 680,
     backgroundColor: '#f4efe7',
-    title: 'Workbench',
+    title: 'DAD Workbench',
     titleBarStyle: 'default',
     show: false,
     webPreferences: {
@@ -108,15 +108,15 @@ function buildMenu() {
   /** @type {Electron.MenuItemConstructorOptions[]} */
   const template = [
     {
-      label: 'Workbench',
+      label: 'DAD Workbench',
       submenu: [
-        { role: 'about', label: 'About Workbench' },
+        { role: 'about', label: 'About DAD Workbench' },
         { type: 'separator' },
-        { role: 'hide', label: 'Hide Workbench' },
+        { role: 'hide', label: 'Hide DAD Workbench' },
         { role: 'hideOthers' },
         { role: 'unhide' },
         { type: 'separator' },
-        { role: 'quit', label: 'Quit Workbench' },
+        { role: 'quit', label: 'Quit DAD Workbench' },
       ],
     },
     {
@@ -183,7 +183,7 @@ function buildMenu() {
         menuCmd('Show Me the Basics Again', 'help:basics'),
         menuCmd('Open the Example Bookshelf', 'help:bookshelf'),
         { type: 'separator' },
-        menuCmd('Workbench Help', 'help:open'),
+        menuCmd('DAD Workbench Help', 'help:open'),
       ],
     },
   ]
@@ -261,7 +261,7 @@ ipcMain.handle('print:html', async (_e, html) => {
 /** Window title, the proxy icon, and the edited dot in the close button. */
 ipcMain.on('doc:state', (_e, { title, filePath, edited }) => {
   if (!mainWindow || mainWindow.isDestroyed()) return
-  mainWindow.setTitle(title || 'Workbench')
+  mainWindow.setTitle(title || 'DAD Workbench')
   mainWindow.setRepresentedFilename(filePath || '')
   mainWindow.setDocumentEdited(Boolean(edited))
 })

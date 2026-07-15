@@ -41,8 +41,26 @@ button { font: inherit; color: inherit; }
 
 .wb-topbar { grid-area: top; }
 .wb-left { grid-area: left; }
-.wb-center { grid-area: center; position: relative; min-width: 0; }
+.wb-center {
+  grid-area: center;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.wb-canvas-wrap { position: relative; flex: 1; min-height: 0; }
 .wb-right { grid-area: right; }
+
+/* The camera controls' own shelf under the 3D scene — never over the model. */
+.wb-bench-band {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  padding: 8px 12px;
+  background: var(--panel);
+  border-top: 2px solid var(--panel-edge);
+}
 
 .wb-left, .wb-right {
   background: var(--panel);
@@ -317,15 +335,11 @@ button { font: inherit; color: inherit; }
 /* ---------- view strip & overlays ---------- */
 
 .wb-viewstrip {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: 14px;
   display: flex;
-  flex-direction: column;
   align-items: center;
   gap: 8px;
-  z-index: 5;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 .wb-viewstrip .row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
 .wb-view-btn {
@@ -335,26 +349,23 @@ button { font: inherit; color: inherit; }
   font-weight: 600;
   border: 2px solid var(--panel-edge);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.94);
+  background: #fff;
   cursor: pointer;
-  box-shadow: var(--shadow);
 }
 .wb-view-btn:hover { border-color: var(--accent); }
 .wb-view-btn.on { border-color: var(--accent); background: var(--accent-soft); }
 
 .wb-snap-readout {
-  position: absolute;
-  left: 14px;
-  bottom: 14px;
-  z-index: 5;
   font-size: 15.5px;
   font-weight: 600;
   padding: 10px 14px;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
   border-radius: 10px;
   border: 2px solid var(--panel-edge);
-  background: rgba(255, 255, 255, 0.94);
+  background: #fff;
   cursor: pointer;
-  box-shadow: var(--shadow);
 }
 
 .wb-flash {
@@ -381,7 +392,7 @@ button { font: inherit; color: inherit; }
 
 .wb-drag-readout {
   position: absolute;
-  bottom: 84px;
+  bottom: 18px;
   left: 50%;
   transform: translateX(-50%);
   background: var(--ink);
@@ -620,10 +631,30 @@ button { font: inherit; color: inherit; }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 14px;
-  background: var(--bg);
+  gap: 10px;
+  background:
+    radial-gradient(ellipse at 50% 38%, #fbf5ea 0%, var(--bg) 62%, #ece2d2 100%);
   z-index: 99;
-  font-size: 22px;
+  color: var(--ink-soft);
+  animation: wb-splash-in 0.5s ease-out;
+}
+@keyframes wb-splash-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.wb-splash svg { margin-bottom: 10px; filter: drop-shadow(0 6px 18px rgba(60, 40, 20, 0.18)); }
+.wb-splash .logo {
+  font-size: 46px;
+  font-weight: 800;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+.wb-splash .logo .dad { color: var(--accent); }
+.wb-splash .tagline {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
   color: var(--ink-soft);
 }
-.wb-splash .logo { font-size: 40px; font-weight: 800; color: var(--ink); }
+.wb-splash .status { margin-top: 26px; font-size: 18px; }

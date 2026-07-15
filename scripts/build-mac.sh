@@ -40,16 +40,16 @@ rule
 say "3/4  Signing the app so macOS will run it…"
 
 APP=""
-for candidate in "$ROOT/release/mac-arm64/Workbench.app" "$ROOT/release/mac/Workbench.app"; do
+for candidate in "$ROOT/release/mac-arm64/DAD Workbench.app" "$ROOT/release/mac/DAD Workbench.app"; do
   if [ -d "$candidate" ]; then APP="$candidate"; break; fi
 done
 
 if [ -z "$APP" ]; then
   # electron-builder can change its output folder name between versions; find it.
-  APP="$(find "$ROOT/release" -maxdepth 2 -name 'Workbench.app' -type d -print -quit 2>/dev/null || true)"
+  APP="$(find "$ROOT/release" -maxdepth 2 -name 'DAD Workbench.app' -type d -print -quit 2>/dev/null || true)"
 fi
 
-[ -n "$APP" ] && [ -d "$APP" ] || die "couldn't find Workbench.app anywhere under release/."
+[ -n "$APP" ] && [ -d "$APP" ] || die "couldn't find DAD Workbench.app anywhere under release/."
 
 say "     Found: ${APP#"$ROOT"/}"
 
@@ -78,7 +78,7 @@ say "signed with a paid Apple developer certificate). After they drag the app"
 say "into Applications, they open Terminal and paste this one line, then press"
 say "Return:"
 say ""
-say "    xattr -dr com.apple.quarantine /Applications/Workbench.app"
+say "    xattr -dr com.apple.quarantine /Applications/DAD Workbench.app"
 say ""
 say "After that, Workbench opens normally, every time."
 say ""

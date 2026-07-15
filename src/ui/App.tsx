@@ -60,10 +60,29 @@ function Overlays() {
   )
 }
 
+/** The dovetail mark, matching the app icon. */
+function DovetailMark({ size = 96 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 96 96" aria-hidden>
+      <rect x="8" y="20" width="80" height="56" rx="6" fill="#c9a06a" stroke="#2b2318" strokeWidth="4" />
+      <path d="M48 20 h40 v56 h-40 l10-10 -10-8 10-10 -10-8 10-10 z" fill="#8d5a34" stroke="#2b2318" strokeWidth="4" strokeLinejoin="round" />
+      <path d="M48 44 l10 6 -10 8 z" fill="#ff7a1a" stroke="#2b2318" strokeWidth="3" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 export function App() {
   const kernelState = useBus((s) => s.kernelState)
   const [sheet, setSheet] = useState<'none' | 'makeit' | 'projects' | 'help'>('none')
   const [replayNonce, setReplayNonce] = useState(0)
+  // the splash stays up until the kernel is ready AND it has had a moment to
+  // be read — a 60ms flash of branding is worse than none
+  const [splashMinTime, setSplashMinTime] = useState(false)
+  useEffect(() => {
+    const t = window.setTimeout(() => setSplashMinTime(true), 1400)
+    return () => window.clearTimeout(t)
+  }, [])
+  const splashDone = kernelState === 'ready' && splashMinTime
 
   // quiet keyboard support (never taught, never required)
   useEffect(() => {
@@ -239,11 +258,16 @@ export function App() {
       />
       <LeftPanel />
       <div className="wb-center">
-        <Viewport />
-        <ViewStrip />
-        <SnapReadout />
-        <Overlays />
-        <Coach replayNonce={replayNonce} />
+        <div className="wb-canvas-wrap">
+          <Viewport />
+          <Overlays />
+          <Coach replayNonce={replayNonce} />
+        </div>
+        {/* the camera controls live in their own band — never over the model */}
+        <div className="wb-bench-band">
+          <SnapReadout />
+          <ViewStrip />
+        </div>
       </div>
       <Inspector />
 
@@ -255,16 +279,25 @@ export function App() {
         onReplayBasics={() => setReplayNonce((n) => n + 1)}
       />
 
-      {kernelState === 'loading' && (
+      {!splashDone && kernelState !== 'failed' && (
         <div className="wb-splash">
-          <div className="logo">Workbench</div>
-          <div>Getting the bench ready…</div>
+          <DovetailMark />
+          <div className="logo">
+            <span className="dad">DAD</span> Workbench
+          </div>
+          <div className="tagline">Digitally Assisted Design</div>
+          <div className="status">Getting the bench ready…</div>
         </div>
       )}
       {kernelState === 'failed' && (
         <div className="wb-splash">
-          <div className="logo">Workbench</div>
-          <div>Something went wrong loading the workshop. Try closing and reopening the app.</div>
+          <DovetailMark />
+          <div className="logo">
+            <span className="dad">DAD</span> Workbench
+          </div>
+          <div className="status">
+            Something went wrong loading the workshop. Try closing and opening it again.
+          </div>
         </div>
       )}
     </div>

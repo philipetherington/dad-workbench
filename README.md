@@ -1,4 +1,4 @@
-# Workbench
+# DAD Workbench
 
 A CAD app simple enough to learn in ten minutes, built for a woodworker who
 found commercial CAD too confusing. Design shelves, jigs, brackets, and
