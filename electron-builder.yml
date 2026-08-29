@@ -45,6 +45,9 @@ mac:
       icon: build/document.icns
 
 dmg:
+  # explicit so the file name never falls back to the package name,
+  # and hyphenated so downloads/links don't need escaping
+  artifactName: DAD-Workbench-${version}-${arch}.${ext}
   title: DAD Workbench
   window:
     width: 560

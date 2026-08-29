@@ -6,13 +6,37 @@ found commercial CAD too confusing. Design shelves, jigs, brackets, and
 cutting holes in them — then get a cut list, an STL, a DXF shop drawing,
 or an OpenSCAD file out.
 
-## Running it
+## Building it from source
 
-```
+You need a Mac with [Node.js](https://nodejs.org) 20 or newer and git.
+Nothing else — no Xcode, no Apple developer account (`codesign` ships with
+macOS and the app is ad-hoc signed).
+
+```bash
+git clone https://github.com/philipetherington/dad-workbench.git
+cd dad-workbench
 npm install
-npm run dev        # http://localhost:5173
-npm test           # 71 unit + integration tests (runs the real CSG kernel)
-npm run build      # production build in dist/
+```
+
+Then pick one:
+
+```bash
+npm run dev        # run it in your browser at http://localhost:5173
+```
+
+```bash
+npm run dev:app    # run it as the real Mac app, live-reloading
+```
+
+```bash
+npm run build:mac  # build the installable app: release/DAD-Workbench-<version>-arm64.dmg
+```
+
+An app you built yourself never shows the "unidentified developer" warning —
+that only appears when the app was downloaded from someone else.
+
+```bash
+npm test           # 216 unit + integration tests (runs the real CSG kernel)
 ```
 
 ## How it works
